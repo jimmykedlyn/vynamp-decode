@@ -3,6 +3,17 @@
 version = 4
 
 [[package]]
+name = "agulha"
+version = "0.0.0"
+dependencies = [
+ "agulha-aiff",
+ "agulha-core",
+ "agulha-pcm",
+ "agulha-riff",
+ "agulha-testkit",
+]
+
+[[package]]
 name = "agulha-aiff"
 version = "0.0.0"
 dependencies = [
