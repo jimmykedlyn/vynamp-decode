@@ -1,0 +1,14 @@
+# arquivo|sha256|rate|channels|spec|frames|gerador
+sine-u8.wav|bdd9b68fc286af3906942bf1d8da121045efa8573b5c08544e03fadb0f179fc5|48000|2|u8|4800|ffmpeg version n8.1.3-23-g5c4f5744cd-20261022 Copyright (c) 2000-2026 the FFmpeg developers
+sine-s16le.wav|0cea4e1c788099d9cc93c556b48684d5ab89affd4b60a25d423921c4cdf92a46|48000|2|s16le|4800|ffmpeg version n8.1.3-23-g5c4f5744cd-20261022 Copyright (c) 2000-2026 the FFmpeg developers
+sine-s24le.wav|991bafdb634d57c37a2e02fcd1969143cda49d7eba3b3e03ee2165dd2f142268|48000|2|s24le|4800|ffmpeg version n8.1.3-23-g5c4f5744cd-20261022 Copyright (c) 2000-2026 the FFmpeg developers
+sine-s32le.wav|a75f7cfa50d2b8e330898605a822c1ea06debde403bc3e8e018f2af735d1c009|48000|2|s32le|4800|ffmpeg version n8.1.3-23-g5c4f5744cd-20261022 Copyright (c) 2000-2026 the FFmpeg developers
+sine-f32le.wav|5af10ec94c018b67bb6d06e168c9b2a68c8ac923f21882016c7357d20af48c67|48000|2|f32le|4800|ffmpeg version n8.1.3-23-g5c4f5744cd-20261022 Copyright (c) 2000-2026 the FFmpeg developers
+sine-f64le.wav|18b9d56400538b70a833b0ac21dcea448324466d6055f19b21664a143bdd0ad8|48000|2|f64le|4800|ffmpeg version n8.1.3-23-g5c4f5744cd-20261022 Copyright (c) 2000-2026 the FFmpeg developers
+sine-6ch-s24le.wav|a19bd495856c1a3e3e73b5c26207be471dd067f1f726ad5061fdf6b171731b8c|48000|6|s24le|4800|ffmpeg version n8.1.3-23-g5c4f5744cd-20261022 Copyright (c) 2000-2026 the FFmpeg developers
+sine-s16le-rf64.wav|d54d9605e8d877566ca1c6b78c6a4d6dbeda9515463848dea162320b80f58444|48000|2|s16le|4800|ffmpeg version n8.1.3-23-g5c4f5744cd-20261022 Copyright (c) 2000-2026 the FFmpeg developers
+sine-s16le.w64|461f82b69ef9e5aab0a2a49d75ef316e2ed8d6233255da1e6f103fd0052f5af0|48000|2|s16le|4800|ffmpeg version n8.1.3-23-g5c4f5744cd-20261022 Copyright (c) 2000-2026 the FFmpeg developers
+sine-s16be.aif|50995801994315ab2800b188e75c8401177f67a4c97eb3aff5bedb0ba97116e4|48000|2|s16be|4800|ffmpeg version n8.1.3-23-g5c4f5744cd-20261022 Copyright (c) 2000-2026 the FFmpeg developers
+sine-s24be.aif|b9fcef224ced157afd1646914237df905a550a1053b35844f7d20a0628288269|48000|2|s24be|4800|ffmpeg version n8.1.3-23-g5c4f5744cd-20261022 Copyright (c) 2000-2026 the FFmpeg developers
+sine-sowt.aifc|ef0463a63e9e32dc4deb04fff5f3834fea96d02c8587f08c913a6d8f7b732b88|48000|2|s16le|4800|ffmpeg version n8.1.3-23-g5c4f5744cd-20261022 Copyright (c) 2000-2026 the FFmpeg developers
+sine-fl32.aifc|6c3437b9eb5b98263eebf68baa3c2891d268f588017c41df9b1df1ca14454fb9|48000|2|f32be|4800|ffmpeg version n8.1.3-23-g5c4f5744cd-20261022 Copyright (c) 2000-2026 the FFmpeg developers

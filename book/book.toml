@@ -1,0 +1,8 @@
+[book]
+title = "agulha"
+authors = ["agulha contributors"]
+language = "en"
+src = "src"
+
+[build]
+build-dir = "../target/book"
