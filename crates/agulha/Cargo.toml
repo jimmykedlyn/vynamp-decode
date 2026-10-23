@@ -1,0 +1,26 @@
+[package]
+name = "agulha"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Dependency-free audio decoding: containers, codecs and a gapless-aware Reader"
+
+[features]
+default = ["riff", "aiff", "pcm"]
+riff = ["dep:agulha-riff"]
+aiff = ["dep:agulha-aiff"]
+pcm = ["dep:agulha-pcm"]
+
+[dependencies]
+agulha-core = { path = "../agulha-core" }
+agulha-riff = { path = "../agulha-riff", optional = true }
+agulha-aiff = { path = "../agulha-aiff", optional = true }
+agulha-pcm = { path = "../agulha-pcm", optional = true }
+
+[dev-dependencies]
+agulha-testkit = { path = "../agulha-testkit" }
+
+[lints]
+workspace = true
