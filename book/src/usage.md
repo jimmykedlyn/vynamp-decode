@@ -3,9 +3,9 @@
 Decode a file with `open_path` and loop over `Reader::read`:
 
 ```rust,no_run
-use agulha::{AudioBuffer, Options, open_path};
+use vynamp_decode::{AudioBuffer, Options, open_path};
 
-fn main() -> agulha::Result<()> {
+fn main() -> vynamp_decode::Result<()> {
     let mut reader = open_path(std::path::Path::new("song.wav"), Options::default())?;
     let track = reader.track().clone();
     println!("{} Hz, {} channels", track.sample_rate, track.channels);
@@ -32,5 +32,5 @@ fn main() -> agulha::Result<()> {
 - Use `open` with a `Box<dyn Source>` (for example `VecSource`) when the data is
   not a file.
 
-A complete example lives in `crates/agulha/examples/decode_to_raw.rs`; the
+A complete example lives in `crates/vynamp-decode/examples/decode_to_raw.rs`; the
 current support table is printed by `cargo run --example support_matrix`.

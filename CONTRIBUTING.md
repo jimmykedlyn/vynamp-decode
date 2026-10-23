@@ -6,12 +6,12 @@
 - `#![forbid(unsafe_code)]` everywhere, enforced by the workspace lint
   `unsafe_code = "forbid"`.
 - Licence: `MIT OR Apache-2.0`.
-- `agulha-core` must never depend on `agulha-testkit`. The testkit may depend on `agulha-core`.
+- `vynamp-decode-core` must never depend on `vynamp-decode-testkit`. The testkit may depend on `vynamp-decode-core`.
 - Commits end with the `Co-Authored-By:` trailer of the agent that authored them.
 
 ### The single `unsafe` exception
 
-`crates/agulha-testkit/src/alloc.rs` implements `GlobalAlloc` for the allocation
+`crates/vynamp-decode-testkit/src/alloc.rs` implements `GlobalAlloc` for the allocation
 counter, which requires `unsafe impl`. The testkit crate (`publish = false`,
 test-only) therefore sets `unsafe_code = "allow"` in its own `[lints.rust]`
 instead of inheriting the workspace lint. Every `unsafe` block there carries a

@@ -1,18 +1,18 @@
 # Architecture
 
-agulha is a std-only workspace: no crates.io dependencies, no `unsafe` in the
+vynamp-decode is a std-only workspace: no crates.io dependencies, no `unsafe` in the
 library crates.
 
 ## Crates
 
 | Crate | Role |
 |-------|------|
-| `agulha-core` | Shared types and traits: `Source`, `Track`, `Packet`, `AudioBuffer`, `Demuxer`, `Decoder`, `Registry`, `Options`, `Error`. Depends on nothing. |
-| `agulha-riff` | RIFF/WAVE, RF64, BW64 and Wave64 demuxer. |
-| `agulha-aiff` | AIFF and AIFF-C demuxer. |
-| `agulha-pcm` | Raw PCM decoder (8/16/24/32-bit integer, 32/64-bit float, both endians). |
-| `agulha` | Facade: `default_registry`, `open`, `open_path` and the gapless-aware `Reader`. |
-| `agulha-testkit` | Test-only: SHA-256, signal generators, container writers, allocation counter. Never a dependency of `agulha-core`. |
+| `vynamp-decode-core` | Shared types and traits: `Source`, `Track`, `Packet`, `AudioBuffer`, `Demuxer`, `Decoder`, `Registry`, `Options`, `Error`. Depends on nothing. |
+| `vynamp-decode-riff` | RIFF/WAVE, RF64, BW64 and Wave64 demuxer. |
+| `vynamp-decode-aiff` | AIFF and AIFF-C demuxer. |
+| `vynamp-decode-pcm` | Raw PCM decoder (8/16/24/32-bit integer, 32/64-bit float, both endians). |
+| `vynamp-decode` | Facade: `default_registry`, `open`, `open_path` and the gapless-aware `Reader`. |
+| `vynamp-decode-testkit` | Test-only: SHA-256, signal generators, container writers, allocation counter. Never a dependency of `vynamp-decode-core`. |
 
 ## Data flow
 

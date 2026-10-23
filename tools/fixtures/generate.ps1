@@ -6,7 +6,7 @@ FFmpeg is never a dependency of the crates and is never run by the tests.
   pwsh tools/fixtures/generate.ps1 [-FFmpeg <path-to-ffmpeg.exe>]
 
 Input: tools/fixtures/source-sine.wav (48 kHz stereo s32, 4800 frames, made by
-`cargo run -p agulha-testkit --example gen_source_sine`). Any ffmpeg failure aborts.
+`cargo run -p vynamp-decode-testkit --example gen_source_sine`). Any ffmpeg failure aborts.
 #>
 param([string]$FFmpeg = $env:FFMPEG)
 $ErrorActionPreference = 'Stop'

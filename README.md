@@ -1,4 +1,4 @@
-# agulha
+# vynamp-decode
 
 Dependency-free audio decoding library in Rust (std only): containers, codecs,
 metadata and CUE, with no crates.io dependencies and no `unsafe` in the library crates.
