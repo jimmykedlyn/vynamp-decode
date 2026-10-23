@@ -316,6 +316,147 @@ mod pcm_decoding {
         assert_eq!(got[0], want);
     }
 
+    fn gap0_open(_: Box<dyn Source>, _: &Options) -> Result<Box<dyn Demuxer>> {
+        let mut s = Synth::with(Some(TOTAL), 0, 0);
+        s.tracks[0].codec = CodecId::Pcm(GAP_SPEC);
+        Ok(Box::new(s))
+    }
+
+    static GAP0: ContainerDescriptor = ContainerDescriptor {
+        name: "gap0",
+        extensions: &[],
+        verification: Verification::Experimental,
+        probe: |h| if h.starts_with(b"GP0") { 50 } else { 0 },
+        open: gap0_open,
+    };
+
+    #[test]
+    fn short_decoder_output_in_audible_region_and_after_seek() {
+        let mut reg = Registry::new();
+        reg.add_container(&GAP0);
+        reg.add_codec(&GAP_CODEC);
+        let mut r = Reader::open_with(
+            &reg,
+            Box::new(SliceSource::new(b"GP0xxxxxxxx")),
+            Options::default(),
+            None,
+        )
+        .unwrap();
+        // Packet 64 yields only 40 frames; later packets stay aligned by pts.
+        let want: Vec<i16> = (0..104).chain(128..1000).collect();
+        assert_eq!(drain_i16(&mut r, 1)[0], want);
+        // Seek onto the short packet (lands at 64, preroll 6).
+        r.seek(70).unwrap();
+        let want: Vec<i16> = (70..104).chain(128..1000).collect();
+        assert_eq!(drain_i16(&mut r, 1)[0], want);
+        // Seek past it.
+        r.seek(500).unwrap();
+        let want: Vec<i16> = (500..1000).collect();
+        assert_eq!(drain_i16(&mut r, 1)[0], want);
+    }
+
+    /// Queues events, then ends the stream (or fails) on the first packet.
+    struct Noisy {
+        tracks: Vec<Track>,
+        pending: usize,
+        fail: bool,
+    }
+
+    impl Demuxer for Noisy {
+        fn tracks(&self) -> &[Track] {
+            &self.tracks
+        }
+        fn next_packet(&mut self, _: &mut Packet) -> Result<bool> {
+            self.pending = self.pending.max(1);
+            if self.fail {
+                Err(Error::Invalid {
+                    what: "noisy",
+                    offset: 0,
+                })
+            } else {
+                Ok(false)
+            }
+        }
+        fn seek(&mut self, _: u32, frame: u64) -> Result<SeekTo> {
+            Ok(SeekTo { frame, preroll: 0 })
+        }
+        fn drain_events(&mut self, out: &mut Vec<Event>) {
+            out.extend((0..self.pending).map(|_| Event::ChecksumMismatch { what: "noisy" }));
+            self.pending = 0;
+        }
+    }
+
+    fn noisy(pending: usize, fail: bool) -> Result<Box<dyn Demuxer>> {
+        let mut s = Synth::new();
+        s.tracks[0].codec = CodecId::Pcm(GAP_SPEC);
+        Ok(Box::new(Noisy {
+            tracks: s.tracks,
+            pending,
+            fail,
+        }))
+    }
+
+    static NOISY_END: ContainerDescriptor = ContainerDescriptor {
+        name: "noisy-end",
+        extensions: &[],
+        verification: Verification::Experimental,
+        probe: |h| if h.starts_with(b"NEN") { 50 } else { 0 },
+        open: |_, _| noisy(0, false),
+    };
+
+    static NOISY_ERR: ContainerDescriptor = ContainerDescriptor {
+        name: "noisy-err",
+        extensions: &[],
+        verification: Verification::Experimental,
+        probe: |h| if h.starts_with(b"NER") { 50 } else { 0 },
+        open: |_, _| noisy(0, true),
+    };
+
+    static NOISY_MANY: ContainerDescriptor = ContainerDescriptor {
+        name: "noisy-many",
+        extensions: &[],
+        verification: Verification::Experimental,
+        probe: |h| if h.starts_with(b"NMA") { 50 } else { 0 },
+        open: |_, _| noisy(5000, false),
+    };
+
+    fn noisy_reader(magic: &'static [u8]) -> Reader {
+        let mut reg = Registry::new();
+        reg.add_container(&NOISY_END);
+        reg.add_container(&NOISY_ERR);
+        reg.add_container(&NOISY_MANY);
+        reg.add_codec(&GAP_CODEC);
+        Reader::open_with(
+            &reg,
+            Box::new(SliceSource::new(magic)),
+            Options::default(),
+            None,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn events_are_drained_at_end_of_stream_and_on_error() {
+        let mut buf = AudioBuffer::new();
+        let mut r = noisy_reader(b"NENxxxxxxxx");
+        assert!(r.take_events().is_empty());
+        assert!(!r.read(&mut buf).unwrap());
+        assert_eq!(r.take_events().len(), 1);
+
+        let mut r = noisy_reader(b"NERxxxxxxxx");
+        assert!(r.read(&mut buf).is_err());
+        assert_eq!(r.take_events().len(), 1);
+    }
+
+    #[test]
+    fn event_queue_is_capped_and_counts_drops() {
+        let mut r = noisy_reader(b"NMAxxxxxxxx");
+        assert_eq!(r.events_dropped(), 5000 - 4096);
+        assert_eq!(r.take_events().len(), 4096);
+        assert_eq!(r.events_dropped(), 0);
+        assert!(r.take_events().is_empty());
+    }
+
     #[test]
     fn gapless_delay_and_padding_span_packets() {
         let mut r = synth_reader(Options::default());

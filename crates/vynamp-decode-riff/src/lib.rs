@@ -124,17 +124,19 @@ pub fn open_riff(mut src: Box<dyn Source>, opts: &Options) -> Result<RiffDemuxer
             (Some(l), Some(c)) => Some(l.min(c)),
             (l, c) => l.or(c),
         };
-        if let (Some(l), Some(c)) = (src.len(), container_end)
-            && c < l
-        {
-            events.push(Event::Clamped {
-                what: "riff data size",
-                declared: l.saturating_sub(data_start),
-                actual: c.saturating_sub(data_start),
-            });
-        }
         end.map(|e| e.saturating_sub(data_start) / block)
     });
+    if declared.is_none()
+        && opts.mode == Mode::Resilient
+        && let (Some(l), Some(c)) = (src.len(), container_end)
+        && c < l
+    {
+        events.push(Event::Clamped {
+            what: "riff data size",
+            declared: l.saturating_sub(data_start),
+            actual: c.saturating_sub(data_start),
+        });
+    }
     if let Some(f) = total {
         opts.limits.check_frames(f)?;
     }

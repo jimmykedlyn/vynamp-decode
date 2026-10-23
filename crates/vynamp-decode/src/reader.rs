@@ -5,6 +5,9 @@ use vynamp_decode_core::{
     Source, Track,
 };
 
+/// Capacity of the diagnostic event queue.
+const MAX_EVENTS: usize = 4096;
+
 /// Decodes the first track of a container, trimming encoder delay, encoder
 /// padding and seek preroll so that the output timeline starts at the first
 /// audible frame.
@@ -23,6 +26,7 @@ pub struct Reader {
     /// Next frame index on the trimmed output timeline.
     out_pos: u64,
     events: Vec<Event>,
+    events_dropped: u64,
 }
 
 impl Reader {
@@ -37,7 +41,7 @@ impl Reader {
     ) -> Result<Self> {
         opts.cancel.check()?;
         let container = registry.probe(src.as_mut(), hint_ext, &opts.limits)?;
-        let mut demuxer = (container.open)(src, &opts)?;
+        let demuxer = (container.open)(src, &opts)?;
         let track = demuxer
             .tracks()
             .first()
@@ -47,13 +51,11 @@ impl Reader {
             .codec_for(&track.codec)
             .ok_or(Error::Unsupported("codec"))?;
         let decoder = (codec.make)(&track, &opts)?;
-        let mut events = Vec::new();
-        demuxer.drain_events(&mut events);
         let delay = u64::from(track.delay);
         let end = track
             .frames
             .map(|f| f.saturating_sub(u64::from(track.padding)).max(delay));
-        Ok(Self {
+        let mut reader = Self {
             demuxer,
             decoder,
             cancel: opts.cancel,
@@ -62,9 +64,26 @@ impl Reader {
             skip_until: delay,
             end,
             out_pos: 0,
-            events,
+            events: Vec::new(),
+            events_dropped: 0,
             track,
-        })
+        };
+        reader.collect_events();
+        Ok(reader)
+    }
+
+    /// Moves pending demuxer and decoder events into the queue, dropping and
+    /// counting those beyond [`MAX_EVENTS`].
+    fn collect_events(&mut self) {
+        let mut fresh = Vec::new();
+        self.demuxer.drain_events(&mut fresh);
+        self.decoder.drain_events(&mut fresh);
+        let room = MAX_EVENTS.saturating_sub(self.events.len());
+        if fresh.len() > room {
+            self.events_dropped += (fresh.len() - room) as u64;
+            fresh.truncate(room);
+        }
+        self.events.append(&mut fresh);
     }
 
     /// The track being decoded.
@@ -86,9 +105,20 @@ impl Reader {
     }
 
     /// Takes the diagnostic events reported so far (recoveries made in
-    /// `Mode::Resilient`), leaving the internal list empty.
+    /// `Mode::Resilient`), leaving the queue empty and resetting
+    /// [`events_dropped`](Self::events_dropped).
+    ///
+    /// The queue holds at most 4096 events; call this periodically on long or
+    /// badly damaged streams, as further events are dropped (and counted).
     pub fn take_events(&mut self) -> Vec<Event> {
+        self.events_dropped = 0;
         std::mem::take(&mut self.events)
+    }
+
+    /// Number of events dropped because the queue was full since the last
+    /// [`take_events`](Self::take_events).
+    pub fn events_dropped(&self) -> u64 {
+        self.events_dropped
     }
 
     /// Decodes the next chunk into `out`.
@@ -96,6 +126,13 @@ impl Reader {
     /// Returns `Ok(true)` with at least one frame in `out`, or `Ok(false)` at
     /// the end of the stream, in which case `out` is left empty.
     pub fn read(&mut self, out: &mut AudioBuffer) -> Result<bool> {
+        let r = self.read_inner(out);
+        // Events are collected on every path, including errors and end of stream.
+        self.collect_events();
+        r
+    }
+
+    fn read_inner(&mut self, out: &mut AudioBuffer) -> Result<bool> {
         loop {
             self.cancel.check()?;
             if self.end.is_some_and(|e| self.pos >= e) {
@@ -106,10 +143,7 @@ impl Reader {
                 out.truncate_back(out.frames());
                 return Ok(false);
             }
-            let decoded = self.decoder.decode(&self.packet, out);
-            self.demuxer.drain_events(&mut self.events);
-            self.decoder.drain_events(&mut self.events);
-            decoded?;
+            self.decoder.decode(&self.packet, out)?;
             // The demuxer timeline is authoritative: a packet that decoded to
             // fewer (or more) frames than it covers must not shift later ones.
             self.pos = self.packet.pts;
