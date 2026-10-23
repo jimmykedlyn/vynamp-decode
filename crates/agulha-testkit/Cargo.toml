@@ -8,6 +8,9 @@ repository.workspace = true
 publish = false
 description = "Test-only helpers for agulha (SHA-256, signal generators, allocation counter)"
 
+[dependencies]
+agulha-core = { path = "../agulha-core" }
+
 # Exception to the workspace `unsafe_code = "forbid"`: only src/alloc.rs needs
 # `unsafe impl GlobalAlloc`. This crate is test-only and never published.
 [lints.rust]

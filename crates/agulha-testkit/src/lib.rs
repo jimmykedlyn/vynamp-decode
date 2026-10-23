@@ -5,5 +5,6 @@
 pub mod alloc;
 mod sha256;
 pub mod signal;
+pub mod writers;
 
 pub use sha256::{hex, sha256};

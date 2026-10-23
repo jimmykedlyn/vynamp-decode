@@ -1,0 +1,18 @@
+[package]
+name = "agulha-riff"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "RIFF/WAVE, RF64/BW64 and Wave64 demuxer for agulha"
+
+[dependencies]
+agulha-core = { path = "../agulha-core" }
+
+[dev-dependencies]
+agulha-testkit = { path = "../agulha-testkit" }
+agulha-pcm = { path = "../agulha-pcm" }
+
+[lints]
+workspace = true

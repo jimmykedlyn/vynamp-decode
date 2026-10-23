@@ -15,5 +15,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "agulha-riff"
+version = "0.0.0"
+dependencies = [
+ "agulha-core",
+ "agulha-pcm",
+ "agulha-testkit",
+]
+
+[[package]]
 name = "agulha-testkit"
 version = "0.0.0"
+dependencies = [
+ "agulha-core",
+]
