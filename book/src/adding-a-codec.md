@@ -26,8 +26,8 @@
 
    | Level | Meaning |
    |-------|---------|
-   | `Conformance` | Bit-exact against an official conformance suite or lossless round trips. |
-   | `Oracle` | Matches a reference implementation's output on a recorded corpus. |
+   | `Conformance` | Bit-exact against official conformance vectors only; round trips do not qualify. |
+   | `Oracle` | Matches a reference implementation's output on a recorded corpus (PCM containers and codec). |
    | `Experimental` | Not yet verified; do not rely on it. |
 
 6. Update the README support table (`cargo run --example support_matrix`) and the

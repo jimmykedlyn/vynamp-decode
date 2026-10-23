@@ -26,6 +26,8 @@ pub struct ContainerDescriptor {
     pub probe: fn(&[u8]) -> u8,
     /// Opens a demuxer over `src`.
     pub open: OpenFn,
+    /// Verification level of the demuxer.
+    pub verification: Verification,
 }
 
 /// Describes a codec.

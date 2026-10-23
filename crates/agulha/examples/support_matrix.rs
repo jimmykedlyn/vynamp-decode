@@ -18,13 +18,14 @@ fn main() {
     println!("|------|------|------------|--------------|");
     for c in reg.containers() {
         println!(
-            "| container | {} | {} | - |",
+            "| container | {} | {} | {} |",
             c.name,
             c.extensions
                 .iter()
                 .map(|e| format!(".{e}"))
                 .collect::<Vec<_>>()
-                .join(" ")
+                .join(" "),
+            level(c.verification)
         );
     }
     for c in reg.codecs() {

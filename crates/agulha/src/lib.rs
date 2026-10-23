@@ -16,6 +16,7 @@ pub static RIFF: ContainerDescriptor = ContainerDescriptor {
     name: "riff",
     extensions: &["wav", "wave", "w64", "rf64", "bw64"],
     probe: agulha_riff::probe_riff,
+    verification: Verification::Oracle,
     open: |src, opts| Ok(Box::new(agulha_riff::open_riff(src, opts)?)),
 };
 
@@ -25,6 +26,7 @@ pub static AIFF: ContainerDescriptor = ContainerDescriptor {
     name: "aiff",
     extensions: &["aif", "aiff", "aifc"],
     probe: agulha_aiff::probe_aiff,
+    verification: Verification::Oracle,
     open: |src, opts| Ok(Box::new(agulha_aiff::open_aiff(src, opts)?)),
 };
 
@@ -32,7 +34,7 @@ pub static AIFF: ContainerDescriptor = ContainerDescriptor {
 #[cfg(feature = "pcm")]
 pub static PCM: CodecDescriptor = CodecDescriptor {
     name: "pcm",
-    verification: Verification::Conformance,
+    verification: Verification::Oracle,
     supports: |id| matches!(id, CodecId::Pcm(_)),
     make: |track, _| Ok(Box::new(agulha_pcm::PcmDecoder::new(track)?)),
 };

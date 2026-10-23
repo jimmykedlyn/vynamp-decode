@@ -2,6 +2,7 @@ use agulha::{Reader, default_registry, open};
 use agulha_core::{
     AudioBuffer, CodecId, ContainerDescriptor, Demuxer, Endian, Error, LimitKind, Limits, Options,
     Packet, PcmEncoding, PcmSpec, Registry, Result, SeekTo, SliceSource, Source, Track, VecSource,
+    Verification,
 };
 use agulha_testkit::writers::{WavVariant, aiff, wav};
 
@@ -148,6 +149,7 @@ fn synth_open_unknown_len(_: Box<dyn Source>, _: &Options) -> Result<Box<dyn Dem
 static SYNTH: ContainerDescriptor = ContainerDescriptor {
     name: "synth",
     extensions: &["syn"],
+    verification: Verification::Experimental,
     probe: |h| if h.starts_with(b"SYN") { 50 } else { 0 },
     open: synth_open,
 };
@@ -155,6 +157,7 @@ static SYNTH: ContainerDescriptor = ContainerDescriptor {
 static SYNTH_SHORT: ContainerDescriptor = ContainerDescriptor {
     name: "synth-short",
     extensions: &[],
+    verification: Verification::Experimental,
     probe: |h| if h.starts_with(b"SHO") { 50 } else { 0 },
     open: synth_open_short,
 };
@@ -162,6 +165,7 @@ static SYNTH_SHORT: ContainerDescriptor = ContainerDescriptor {
 static SYNTH_UNKNOWN: ContainerDescriptor = ContainerDescriptor {
     name: "synth-unknown",
     extensions: &[],
+    verification: Verification::Experimental,
     probe: |h| if h.starts_with(b"UNK") { 50 } else { 0 },
     open: synth_open_unknown_len,
 };
@@ -412,24 +416,28 @@ fn tie_open(_: Box<dyn Source>, _: &Options) -> Result<Box<dyn Demuxer>> {
 static TIE_A: ContainerDescriptor = ContainerDescriptor {
     name: "a",
     extensions: &["aaa"],
+    verification: Verification::Experimental,
     probe: |_| 10,
     open: tie_open,
 };
 static TIE_B: ContainerDescriptor = ContainerDescriptor {
     name: "b",
     extensions: &["bbb", "BBX"],
+    verification: Verification::Experimental,
     probe: |_| 10,
     open: tie_open,
 };
 static LOW: ContainerDescriptor = ContainerDescriptor {
     name: "low",
     extensions: &["low"],
+    verification: Verification::Experimental,
     probe: |_| 1,
     open: tie_open,
 };
 static NONE: ContainerDescriptor = ContainerDescriptor {
     name: "none",
     extensions: &[],
+    verification: Verification::Experimental,
     probe: |_| 0,
     open: tie_open,
 };
@@ -504,4 +512,15 @@ fn codec_lookup() {
 fn reader_is_send() {
     fn assert_send<T: Send>() {}
     assert_send::<Reader>();
+}
+
+#[cfg(all(feature = "riff", feature = "aiff", feature = "pcm"))]
+#[test]
+fn builtin_formats_are_oracle_verified() {
+    let reg = default_registry();
+    assert!(
+        reg.containers()
+            .all(|c| c.verification == Verification::Oracle)
+    );
+    assert!(reg.codecs().all(|c| c.verification == Verification::Oracle));
 }
