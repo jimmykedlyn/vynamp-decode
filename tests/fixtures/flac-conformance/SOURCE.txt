@@ -1,0 +1,5 @@
+Source: https://github.com/ietf-wg-cellar/flac-test-files (commit aa7b0c6cf32994c106ae517a08134c28a96ff5b2)
+License: CC0 1.0 Universal (LICENSE.txt). A selection of the "subset" group and of the "faulty" group
+(file 10, invalid Vorbis comment block, is omitted: validated in plan 04). Files are unmodified.
+The other subset files (48, 52, 55 etc.) are too large to commit; run the full set with
+VYNAMP_FLAC_TEST_FILES=<clone> cargo test -p vynamp-decode --test conformance_flac

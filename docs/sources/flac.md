@@ -14,3 +14,12 @@ was written from the specification only.
   126 are reserved.
 - ID3v2 tags in front of the `fLaC` marker are tolerated (skipped by the core
   `skip_id3v2`); they are not part of RFC 9639.
+- IETF CELLAR `flac-test-files` (https://github.com/ietf-wg-cellar/flac-test-files, commit
+  aa7b0c6cf32994c106ae517a08134c28a96ff5b2), by Martijn van Beurden, dedicated to the public
+  domain under CC0 1.0 Universal ("has waived all copyright and related or neighboring
+  rights"). A selection is redistributed unmodified in `tests/fixtures/flac-conformance/`
+  together with its `LICENSE.txt`; it is used as test data only.
+- RFC 9639 appendix B.1 ("Addition of Blocking Strategy Bit"): streams written before July 2007
+  do not flag variable block sizes in the frame header; decoders compare the minimum and
+  maximum block size in STREAMINFO. Section 4.1: block sizes below 16 are only allowed in the
+  last block.

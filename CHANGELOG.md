@@ -7,3 +7,15 @@
   demuxers and the PCM decoder.
 - Third-party PCM oracle corpus (FFmpeg-generated, dev-only), `support_matrix`
   example and mdBook sources.
+- FLAC (RFC 9639): native demuxer (frame sync, CRC-checked packetization, exact seek, Resilient
+  recovery) and decoder (constant, verbatim, fixed and LPC subframes, Rice residuals, stereo
+  decorrelation, wasted bits, up to 32 bits and 8 channels) with STREAMINFO MD5 verification.
+  Legacy variable block size streams (pre-2007 layout) are recognised.
+- FLAC oracle corpus (FFmpeg-generated, dev-only, 22 files with PCM references; the pinned FFmpeg
+  cannot write 8-bit FLAC) and a conformance subset of the CC0 IETF `flac-test-files` (20 of the
+  67 `subset` files committed, all 67 pass with the default limits when run from a clone; the
+  `faulty` files are rejected in Strict mode except file 10, an invalid Vorbis comment block,
+  which is validated in plan 04). FLAC is therefore `conformance`.
+- Strict mode rejects more samples than STREAMINFO declares and non-final blocks below 16
+  samples; Resilient reports `Event::Clamped` for the former and keeps the audio.
+- Default `Limits::max_metadata_bytes` raised from 16 MiB to 64 MiB (large cover art).

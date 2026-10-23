@@ -793,11 +793,16 @@ fn reader_is_send() {
 }
 
 #[test]
-fn builtin_formats_are_oracle_verified() {
+fn builtin_formats_have_the_expected_verification_level() {
+    // FLAC has official conformance vectors (IETF flac-test-files); PCM has none.
+    let want = |name: &str| {
+        if name == "flac" {
+            Verification::Conformance
+        } else {
+            Verification::Oracle
+        }
+    };
     let reg = default_registry();
-    assert!(
-        reg.containers()
-            .all(|c| c.verification == Verification::Oracle)
-    );
-    assert!(reg.codecs().all(|c| c.verification == Verification::Oracle));
+    assert!(reg.containers().all(|c| c.verification == want(c.name)));
+    assert!(reg.codecs().all(|c| c.verification == want(c.name)));
 }

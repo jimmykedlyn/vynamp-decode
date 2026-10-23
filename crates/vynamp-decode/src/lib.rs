@@ -36,7 +36,7 @@ pub static FLAC: ContainerDescriptor = ContainerDescriptor {
     name: "flac",
     extensions: &["flac", "fla"],
     probe: vynamp_decode_flac::probe_flac,
-    verification: Verification::Oracle,
+    verification: Verification::Conformance,
     open: |src, opts| Ok(Box::new(vynamp_decode_flac::open_flac(src, opts)?)),
 };
 
@@ -53,7 +53,7 @@ pub static PCM: CodecDescriptor = CodecDescriptor {
 #[cfg(feature = "flac")]
 pub static FLAC_CODEC: CodecDescriptor = CodecDescriptor {
     name: "flac",
-    verification: Verification::Oracle,
+    verification: Verification::Conformance,
     supports: |id| matches!(id, CodecId::Flac),
     make: |track, opts| {
         Ok(Box::new(vynamp_decode_flac::FlacDecoder::with_options(
