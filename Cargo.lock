@@ -8,6 +8,7 @@ version = "0.0.0"
 dependencies = [
  "vynamp-decode-aiff",
  "vynamp-decode-core",
+ "vynamp-decode-flac",
  "vynamp-decode-pcm",
  "vynamp-decode-riff",
  "vynamp-decode-testkit",

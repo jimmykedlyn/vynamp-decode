@@ -773,10 +773,16 @@ fn codec_lookup() {
         reg.codec_for(&CodecId::Pcm(SPEC16)).is_some(),
         cfg!(feature = "pcm")
     );
-    assert!(reg.codec_for(&CodecId::Flac).is_none());
+    assert_eq!(
+        reg.codec_for(&CodecId::Flac).is_some(),
+        cfg!(feature = "flac")
+    );
+    assert!(reg.codec_for(&CodecId::Mp3).is_none());
     assert_eq!(
         reg.containers().count(),
-        usize::from(cfg!(feature = "riff")) + usize::from(cfg!(feature = "aiff"))
+        usize::from(cfg!(feature = "riff"))
+            + usize::from(cfg!(feature = "aiff"))
+            + usize::from(cfg!(feature = "flac"))
     );
 }
 

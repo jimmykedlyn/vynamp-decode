@@ -30,6 +30,16 @@ pub static AIFF: ContainerDescriptor = ContainerDescriptor {
     open: |src, opts| Ok(Box::new(vynamp_decode_aiff::open_aiff(src, opts)?)),
 };
 
+/// Descriptor of the native FLAC container.
+#[cfg(feature = "flac")]
+pub static FLAC: ContainerDescriptor = ContainerDescriptor {
+    name: "flac",
+    extensions: &["flac", "fla"],
+    probe: vynamp_decode_flac::probe_flac,
+    verification: Verification::Oracle,
+    open: |src, opts| Ok(Box::new(vynamp_decode_flac::open_flac(src, opts)?)),
+};
+
 /// Descriptor of the raw PCM codec.
 #[cfg(feature = "pcm")]
 pub static PCM: CodecDescriptor = CodecDescriptor {
@@ -37,6 +47,19 @@ pub static PCM: CodecDescriptor = CodecDescriptor {
     verification: Verification::Oracle,
     supports: |id| matches!(id, CodecId::Pcm(_)),
     make: |track, _| Ok(Box::new(vynamp_decode_pcm::PcmDecoder::new(track)?)),
+};
+
+/// Descriptor of the FLAC codec.
+#[cfg(feature = "flac")]
+pub static FLAC_CODEC: CodecDescriptor = CodecDescriptor {
+    name: "flac",
+    verification: Verification::Oracle,
+    supports: |id| matches!(id, CodecId::Flac),
+    make: |track, opts| {
+        Ok(Box::new(vynamp_decode_flac::FlacDecoder::with_options(
+            track, opts,
+        )?))
+    },
 };
 
 /// Registry containing every container and codec enabled by features.
@@ -47,8 +70,12 @@ pub fn default_registry() -> Registry {
     reg.add_container(&RIFF);
     #[cfg(feature = "aiff")]
     reg.add_container(&AIFF);
+    #[cfg(feature = "flac")]
+    reg.add_container(&FLAC);
     #[cfg(feature = "pcm")]
     reg.add_codec(&PCM);
+    #[cfg(feature = "flac")]
+    reg.add_codec(&FLAC_CODEC);
     reg
 }
 
