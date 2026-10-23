@@ -159,6 +159,75 @@ pub fn wav(
     out
 }
 
+/// Encodes a positive integer as an IEEE 754 80-bit extended number (big endian).
+///
+/// Zero is encoded as all zero bytes.
+pub fn extended_80(value: u32) -> [u8; 10] {
+    let mut out = [0u8; 10];
+    if value == 0 {
+        return out;
+    }
+    let e = 31 - value.leading_zeros();
+    let exp = 16383 + e as u16;
+    let mantissa = u64::from(value) << (63 - e);
+    out[..2].copy_from_slice(&exp.to_be_bytes());
+    out[2..].copy_from_slice(&mantissa.to_be_bytes());
+    out
+}
+
+fn iff_chunk(out: &mut Vec<u8>, id: &[u8; 4], body: &[u8]) {
+    out.extend(id);
+    out.extend((body.len() as u32).to_be_bytes());
+    out.extend(body);
+    if body.len() % 2 == 1 {
+        out.push(0);
+    }
+}
+
+/// Builds an AIFF file (`compression == None`) or AIFF-C file around
+/// `interleaved_bytes` (samples already interleaved and in the byte order
+/// the file format requires). The `COMM` sample size is `spec.valid_bits`;
+/// the frame count is derived from the data length.
+pub fn aiff(
+    spec: PcmSpec,
+    rate: u32,
+    channels: u16,
+    interleaved_bytes: &[u8],
+    compression: Option<[u8; 4]>,
+) -> Vec<u8> {
+    let frame_bytes = (usize::from(channels) * usize::from(container_bits(spec) / 8)).max(1);
+    let frames = (interleaved_bytes.len() / frame_bytes) as u32;
+    let mut out = Vec::new();
+    out.extend(b"FORM");
+    out.extend(0u32.to_be_bytes());
+    out.extend(if compression.is_some() {
+        b"AIFC"
+    } else {
+        b"AIFF"
+    });
+    if compression.is_some() {
+        iff_chunk(&mut out, b"FVER", &0xA280_5140u32.to_be_bytes());
+    }
+    let mut comm = Vec::new();
+    comm.extend(channels.to_be_bytes());
+    comm.extend(frames.to_be_bytes());
+    comm.extend(u16::from(spec.valid_bits).to_be_bytes());
+    comm.extend(extended_80(rate));
+    if let Some(c) = compression {
+        comm.extend(c);
+        comm.extend([0u8, 0]); // empty pstring, padded to even length
+    }
+    iff_chunk(&mut out, b"COMM", &comm);
+    let mut ssnd = Vec::new();
+    ssnd.extend(0u32.to_be_bytes()); // offset
+    ssnd.extend(0u32.to_be_bytes()); // block size
+    ssnd.extend(interleaved_bytes);
+    iff_chunk(&mut out, b"SSND", &ssnd);
+    let total = (out.len() - 8) as u32;
+    out[4..8].copy_from_slice(&total.to_be_bytes());
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,5 +247,26 @@ mod tests {
         assert_eq!(riff_size, w.len() - 8);
         assert_eq!(&w[36..40], b"data");
         assert_eq!(&w[44..], &[1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn aiff_layout() {
+        let spec = PcmSpec {
+            encoding: PcmEncoding::Signed,
+            bits: 16,
+            valid_bits: 16,
+            endian: Endian::Big,
+        };
+        let a = aiff(spec, 44100, 1, &[1, 2, 3, 4], None);
+        assert_eq!(&a[0..4], b"FORM");
+        assert_eq!(&a[8..12], b"AIFF");
+        assert_eq!(&a[12..16], b"COMM");
+        assert_eq!(&a[28..38], &[0x40, 0x0E, 0xAC, 0x44, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(
+            u32::from_be_bytes(a[4..8].try_into().unwrap()) as usize,
+            a.len() - 8
+        );
+        assert_eq!(&a[a.len() - 4..], &[1, 2, 3, 4]);
+        assert_eq!(&aiff(spec, 8000, 1, &[], Some(*b"NONE"))[8..12], b"AIFC");
     }
 }
