@@ -1,0 +1,6 @@
+* text=auto eol=lf
+*.wav binary
+*.aif binary
+*.aiff binary
+*.w64 binary
+*.bin binary
