@@ -136,14 +136,54 @@ fn extended_canonical_rates() {
 }
 
 #[test]
+fn extended_rounds_fractional_rates_to_nearest() {
+    let cases: [(u32, [u8; 10]); 6] = [
+        // 22254.545454 Hz (the Mac 22 kHz rate).
+        (
+            22255,
+            [0x40, 0x0D, 0xAD, 0xDD, 0x17, 0x45, 0xBF, 0x26, 0xF0, 0x00],
+        ),
+        (44100, [0x40, 0x0E, 0xAC, 0x44, 0x40, 0, 0, 0, 0, 0]), // 44100.25
+        (44101, [0x40, 0x0E, 0xAC, 0x44, 0x80, 0, 0, 0, 0, 0]), // 44100.5
+        (1, [0x3F, 0xFE, 0x80, 0, 0, 0, 0, 0, 0, 0]),           // 0.5
+        (1, [0x3F, 0xFE, 0xC0, 0, 0, 0, 0, 0, 0, 0]),           // 0.75
+        (
+            u32::MAX,
+            [0x40, 0x1E, 0xFF, 0xFF, 0xFF, 0xFF, 0x40, 0, 0, 0], // MAX + 0.25
+        ),
+    ];
+    for (rate, bytes) in cases {
+        assert_eq!(extended::to_u32(bytes), Ok(rate), "{bytes:02X?}");
+    }
+}
+
+#[test]
+fn fractional_rate_is_accepted_in_both_modes() {
+    let good = aiff(s16(), RATE, 2, &[0; 16], None);
+    let mut f = good.clone();
+    patch(
+        &mut f,
+        28,
+        &[0x40, 0x0D, 0xAD, 0xDD, 0x17, 0x45, 0xBF, 0x26, 0xF0, 0x00],
+    );
+    for opts in [Options::default(), resilient()] {
+        let d = open(f.clone(), &opts).unwrap();
+        assert_eq!(d.tracks()[0].sample_rate, 22255);
+    }
+}
+
+#[test]
 fn extended_rejects() {
     let bad: [(&str, [u8; 10]); 10] = [
         ("zero", [0; 10]),
         ("negative", [0xC0, 0x0E, 0xAC, 0x44, 0, 0, 0, 0, 0, 0]),
         ("nan", [0x7F, 0xFF, 0xC0, 0, 0, 0, 0, 0, 0, 0]),
         ("inf", [0x7F, 0xFF, 0x80, 0, 0, 0, 0, 0, 0, 0]),
-        ("fraction", [0x40, 0x0E, 0xAC, 0x44, 0x80, 0, 0, 0, 0, 0]),
-        ("below one", [0x3F, 0xFE, 0x80, 0, 0, 0, 0, 0, 0, 0]),
+        ("below half", [0x3F, 0xFD, 0x80, 0, 0, 0, 0, 0, 0, 0]),
+        (
+            "rounds to 2^32",
+            [0x40, 0x1E, 0xFF, 0xFF, 0xFF, 0xFF, 0x80, 0, 0, 0],
+        ),
         ("2^32", [0x40, 0x1F, 0x80, 0, 0, 0, 0, 0, 0, 0]),
         ("no integer bit", [0x40, 0x0E, 0x2C, 0x44, 0, 0, 0, 0, 0, 0]),
         ("denormal", [0x00, 0x00, 0x00, 0, 0, 0, 0, 0, 0, 1]),
@@ -379,7 +419,7 @@ fn rate_channels_and_sample_size() {
         "sample rate"
     );
     assert_eq!(
-        try_rate([0x40, 0x0E, 0xAC, 0x44, 0x80, 0, 0, 0, 0, 0]),
+        try_rate([0x3F, 0xFD, 0x80, 0, 0, 0, 0, 0, 0, 0]),
         "sample rate"
     );
     // The error offset is the absolute position of the COMM body.

@@ -18,5 +18,7 @@ descriptions only.
   as unsupported.
 - IEEE Std 754-2019 / x87 double-extended format definition: 1 sign bit,
   15-bit exponent with bias 16383, 64-bit significand with an explicit integer
-  bit (63-bit fraction). Used by `extended::to_u32`, which accepts only exact
-  positive integers up to `u32::MAX`.
+  bit (63-bit fraction). Used by `extended::to_u32`, which rounds to the
+  nearest integer (22254.545454 Hz becomes 22255 Hz) and accepts the result in
+  both modes; zero, negative, NaN, infinite and results above `u32::MAX` are
+  rejected.

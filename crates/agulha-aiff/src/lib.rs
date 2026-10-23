@@ -26,6 +26,7 @@
 #![warn(missing_docs)]
 
 mod comm;
+#[doc(hidden)]
 pub mod extended;
 
 use agulha_core::{

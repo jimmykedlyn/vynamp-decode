@@ -2,12 +2,14 @@
 
 use agulha_core::{Error, Result};
 
-/// Converts a big-endian 80-bit extended number to a `u32`.
+/// Converts a big-endian 80-bit extended number to a `u32`, rounding to the
+/// nearest integer (halves round up).
 ///
 /// Layout: 1 sign bit, 15-bit exponent (bias 16383), 64-bit significand with an
-/// explicit integer bit. Only exact positive integers that fit in a `u32` are
-/// accepted; zero, negative values, NaN, infinity, denormals, values with a
-/// fractional part and values above `u32::MAX` fail with
+/// explicit integer bit. Fractional rates such as 22254.545454 Hz (classic Mac
+/// 22 kHz) are accepted and rounded. Zero, negative values, NaN, infinity,
+/// denormals, unnormalised numbers, values that round to zero (below 0.5) and
+/// values that round above `u32::MAX` fail with
 /// `Invalid { what: "sample rate", offset: 0 }` (callers re-base the offset).
 pub fn to_u32(bytes: [u8; 10]) -> Result<u32> {
     let invalid = Error::Invalid {
@@ -26,13 +28,16 @@ pub fn to_u32(bytes: [u8; 10]) -> Result<u32> {
     }
     // value = mantissa * 2^(e - 63) with the integer bit at position 63.
     let e = exp - 16383;
-    if !(0..=31).contains(&e) {
-        // Below 1 (non-integer) or at least 2^32.
-        return Err(invalid);
-    }
-    let shift = (63 - e) as u32;
-    if mantissa & ((1u64 << shift) - 1) != 0 {
-        return Err(invalid);
-    }
-    Ok((mantissa >> shift) as u32)
+    let rounded = match e {
+        // [0.5, 1) rounds up to 1; anything smaller rounds to zero.
+        -1 => 1,
+        0..=62 => {
+            let shift = (63 - e) as u32; // 1..=63
+            let whole = mantissa >> shift;
+            let half = 1u64 << (shift - 1);
+            whole + u64::from(mantissa & ((1u64 << shift) - 1) >= half)
+        }
+        _ => return Err(invalid),
+    };
+    u32::try_from(rounded).map_err(|_| invalid)
 }
