@@ -77,7 +77,7 @@ pub struct RawBlock {
 
 impl StreamInfo {
     /// Parses and validates a 34-byte STREAMINFO body that starts at `offset`.
-    fn parse(body: &[u8; STREAMINFO_LEN], offset: u64) -> Result<Self> {
+    pub(crate) fn parse(body: &[u8; STREAMINFO_LEN], offset: u64) -> Result<Self> {
         let bad = |what| Error::Invalid { what, offset };
         let mut b = BitReader::new(body);
         let min_block = b.read_bits(16)? as u16;

@@ -1,4 +1,4 @@
-//! FLAC demuxer (RFC 9639): metadata, frame packetization and exact seek.
+//! FLAC demuxer and decoder (RFC 9639): metadata, frame packetization, exact seek and subframe decoding.
 //!
 //! `open_flac` skips a leading ID3v2 tag, checks the `fLaC` marker and parses
 //! the metadata blocks. STREAMINFO must come first and is validated; the total
@@ -17,12 +17,20 @@
 //! returns the first sample of the frame holding the target and the preroll
 //! to discard, using the seek table when it checks out and bisection over the
 //! file otherwise. Only an ID3v1 tag is recognised after the last frame.
+//!
+//! `FlacDecoder` decodes one packet (one frame) at a time: subframes (constant, verbatim,
+//! fixed, LPC), Rice residuals and stereo decorrelation, bit-exactly; an empty packet
+//! decodes to silence.
 #![warn(missing_docs)]
 
+mod decode;
 mod demux;
 mod frame;
 mod metadata;
+mod residual;
+mod subframe;
 
+pub use decode::FlacDecoder;
 pub use demux::{FlacDemuxer, open_flac};
 pub use frame::{ChannelAssignment, FrameHeader};
 pub use metadata::{BlockKind, RawBlock, SeekPoint, StreamInfo};
