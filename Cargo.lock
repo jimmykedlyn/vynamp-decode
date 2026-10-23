@@ -7,5 +7,13 @@ name = "agulha-core"
 version = "0.0.0"
 
 [[package]]
+name = "agulha-pcm"
+version = "0.0.0"
+dependencies = [
+ "agulha-core",
+ "agulha-testkit",
+]
+
+[[package]]
 name = "agulha-testkit"
 version = "0.0.0"
