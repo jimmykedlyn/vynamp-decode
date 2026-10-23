@@ -7,6 +7,8 @@
 //! keeps the top 8 with a +128 offset) and converts to float as x / 2^31; every
 //! conversion in the corpus turned out exact, so all comparisons are strict.
 
+#![cfg(all(feature = "riff", feature = "aiff", feature = "pcm"))]
+
 use agulha::{AudioBuffer, Options, SampleFormat, open_path};
 use agulha_testkit::signal::sine_i32;
 use agulha_testkit::{hex, sha256};
