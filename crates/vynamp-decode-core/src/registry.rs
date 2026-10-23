@@ -60,19 +60,24 @@ fn read_full(src: &mut dyn Source, buf: &mut [u8]) -> Result<usize> {
 
 /// Returns the offset just past the ID3v2 tag(s) that start the stream, or 0.
 ///
+/// Leaves `src` positioned at the returned offset.
+///
 /// Each tag is `"ID3"`, version, revision, flags, a 4-byte synchsafe size and
 /// an optional 10-byte footer (flag 0x10). Skipping stops at the first header
 /// that is truncated or malformed (version byte 0xFF or a size byte >= 0x80);
 /// the offset then points at that header.
-fn skip_id3v2(src: &mut dyn Source, limits: &Limits) -> Result<u64> {
+pub fn skip_id3v2(src: &mut dyn Source, limits: &Limits) -> Result<u64> {
     let mut offset = 0u64;
     loop {
         src.seek(offset)?;
         let mut h = [0u8; 10];
-        if read_full(src, &mut h)? < h.len() || &h[..3] != b"ID3" {
-            return Ok(offset);
-        }
-        if h[3] == 0xFF || h[4] == 0xFF || h[6..].iter().any(|&b| b >= 0x80) {
+        if read_full(src, &mut h)? < h.len()
+            || &h[..3] != b"ID3"
+            || h[3] == 0xFF
+            || h[4] == 0xFF
+            || h[6..].iter().any(|&b| b >= 0x80)
+        {
+            src.seek(offset)?;
             return Ok(offset);
         }
         let size = h[6..]

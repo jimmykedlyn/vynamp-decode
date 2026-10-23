@@ -595,3 +595,34 @@ fn byte_flip_and_truncation_smoke() {
         }
     }
 }
+
+#[test]
+fn riff_unknown_size_bounded_by_container_emits_clamped() {
+    use vynamp_decode_core::Event;
+    let s = s16();
+    let data = samples(s, 2, 300);
+    let mut file = wav(s, RATE, 2, &data, WavVariant::Riff);
+    patch(&mut file, 40, &0u32.to_le_bytes());
+    // Without trailing chunks nothing is clamped.
+    let mut d = open(file.clone(), &resilient()).unwrap();
+    let mut ev = Vec::new();
+    d.drain_events(&mut ev);
+    assert!(ev.is_empty());
+
+    file.extend(b"LIST");
+    file.extend(8u32.to_le_bytes());
+    file.extend([7u8; 8]);
+    let mut d = open(file, &resilient()).unwrap();
+    d.drain_events(&mut ev);
+    assert_eq!(
+        ev,
+        [Event::Clamped {
+            what: "riff data size",
+            declared: data.len() as u64 + 16,
+            actual: data.len() as u64,
+        }]
+    );
+    ev.clear();
+    d.drain_events(&mut ev);
+    assert!(ev.is_empty());
+}

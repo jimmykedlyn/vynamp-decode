@@ -9,6 +9,8 @@ pub struct Packet {
     pub pts: u64,
     /// Number of frames the packet decodes to.
     pub frames: u32,
+    /// Absolute source byte position of the packet's first byte.
+    pub offset: u64,
     /// Packet payload.
     pub data: Vec<u8>,
 }

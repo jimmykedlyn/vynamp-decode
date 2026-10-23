@@ -18,6 +18,17 @@ pub enum CodecId {
     Mp3,
 }
 
+/// How reliable a track's `delay`, `padding` and `frames` are.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GaplessKind {
+    /// Exact by construction (lossless formats).
+    Exact,
+    /// Taken from encoder metadata.
+    FromMetadata,
+    /// Not known.
+    Unknown,
+}
+
 /// An audio track inside a container.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Track {
@@ -37,6 +48,8 @@ pub struct Track {
     pub delay: u32,
     /// Encoder padding in frames to drop at the end.
     pub padding: u32,
+    /// Reliability of `delay`, `padding` and `frames`.
+    pub gapless: GaplessKind,
     /// Codec-specific setup data.
     pub codec_private: Vec<u8>,
 }

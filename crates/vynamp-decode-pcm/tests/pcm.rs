@@ -1,5 +1,6 @@
 use vynamp_decode_core::{
-    AudioBuffer, CodecId, Decoder, Endian, Error, Packet, PcmEncoding, PcmSpec, SampleFormat, Track,
+    AudioBuffer, CodecId, Decoder, Endian, Error, GaplessKind, Packet, PcmEncoding, PcmSpec,
+    SampleFormat, Track,
 };
 use vynamp_decode_pcm::PcmDecoder;
 use vynamp_decode_testkit::alloc::{CountingAlloc, allocations_on_this_thread};
@@ -22,6 +23,7 @@ fn track(encoding: PcmEncoding, bits: u8, endian: Endian) -> Track {
         frames: None,
         delay: 0,
         padding: 0,
+        gapless: GaplessKind::Exact,
         codec_private: Vec::new(),
     }
 }
@@ -30,6 +32,7 @@ fn packet(data: Vec<u8>, frames: u32) -> Packet {
     Packet {
         track: 0,
         pts: 0,
+        offset: 0,
         frames,
         data,
     }
@@ -207,4 +210,20 @@ fn no_allocations_after_warmup() {
         d.decode(&p, &mut out).unwrap();
     }
     assert_eq!(allocations_on_this_thread(), before);
+}
+
+#[test]
+fn wrong_size_error_carries_packet_offset() {
+    let t = track(PcmEncoding::Signed, 16, Endian::Little);
+    let mut d = PcmDecoder::new(&t).unwrap();
+    let mut out = AudioBuffer::new();
+    let mut p = packet(vec![0; 7], 2);
+    p.offset = 1234;
+    assert_eq!(
+        d.decode(&p, &mut out),
+        Err(Error::Invalid {
+            what: "pcm packet size",
+            offset: 1234
+        })
+    );
 }

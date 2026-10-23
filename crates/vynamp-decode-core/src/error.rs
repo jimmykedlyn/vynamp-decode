@@ -21,6 +21,10 @@ pub enum LimitKind {
 }
 
 /// Errors produced while reading or decoding.
+///
+/// There is no end-of-file variant: the end of a stream is `Ok(false)` from
+/// `Demuxer::next_packet` and `Reader::read`, and truncated data is
+/// `Invalid { what: "unexpected eof", .. }`.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {

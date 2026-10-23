@@ -23,7 +23,8 @@ mod wav;
 
 use fmt::Fmt;
 use vynamp_decode_core::{
-    CancelToken, CodecId, Demuxer, Error, Mode, Options, Packet, Result, SeekTo, Source, Track,
+    CancelToken, CodecId, Demuxer, Error, Event, GaplessKind, Mode, Options, Packet, Result,
+    SeekTo, Source, Track,
 };
 
 /// Maximum frames per packet.
@@ -65,6 +66,7 @@ pub struct RiffDemuxer {
     total: Option<u64>,
     /// Frames already returned (position of the next packet).
     next_frame: u64,
+    events: Vec<Event>,
 }
 
 fn read_full(src: &mut dyn Source, buf: &mut [u8]) -> Result<usize> {
@@ -116,11 +118,21 @@ pub fn open_riff(mut src: Box<dyn Source>, opts: &Options) -> Result<RiffDemuxer
     if let Some(f) = declared {
         opts.limits.check_frames(f)?;
     }
+    let mut events = Vec::new();
     let total = declared.or_else(|| {
         let end = match (src.len(), container_end) {
             (Some(l), Some(c)) => Some(l.min(c)),
             (l, c) => l.or(c),
         };
+        if let (Some(l), Some(c)) = (src.len(), container_end)
+            && c < l
+        {
+            events.push(Event::Clamped {
+                what: "riff data size",
+                declared: l.saturating_sub(data_start),
+                actual: c.saturating_sub(data_start),
+            });
+        }
         end.map(|e| e.saturating_sub(data_start) / block)
     });
     if let Some(f) = total {
@@ -136,6 +148,7 @@ pub fn open_riff(mut src: Box<dyn Source>, opts: &Options) -> Result<RiffDemuxer
         frames: declared,
         delay: 0,
         padding: 0,
+        gapless: GaplessKind::Exact,
         codec_private: Vec::new(),
     };
     Ok(RiffDemuxer {
@@ -147,6 +160,7 @@ pub fn open_riff(mut src: Box<dyn Source>, opts: &Options) -> Result<RiffDemuxer
         data_start,
         total,
         next_frame: 0,
+        events,
     })
 }
 
@@ -185,6 +199,7 @@ impl Demuxer for RiffDemuxer {
         }
         out.track = 0;
         out.pts = self.next_frame;
+        out.offset = self.src.position().saturating_sub(got as u64);
         out.frames = whole as u32;
         self.next_frame += whole;
         Ok(true)
@@ -205,5 +220,9 @@ impl Demuxer for RiffDemuxer {
         self.src.seek(pos)?;
         self.next_frame = frame;
         Ok(SeekTo { frame, preroll: 0 })
+    }
+
+    fn drain_events(&mut self, out: &mut Vec<Event>) {
+        out.append(&mut self.events);
     }
 }

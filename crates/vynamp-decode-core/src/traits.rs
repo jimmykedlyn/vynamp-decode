@@ -1,6 +1,6 @@
 //! Demuxer and decoder traits.
 
-use crate::{AudioBuffer, Packet, Result, Track};
+use crate::{AudioBuffer, Event, Packet, Result, Track};
 
 /// Result of a seek.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,6 +19,8 @@ pub trait Demuxer: Send {
     fn next_packet(&mut self, out: &mut Packet) -> Result<bool>;
     /// Seeks `track` towards `frame`.
     fn seek(&mut self, track: u32, frame: u64) -> Result<SeekTo>;
+    /// Moves pending diagnostic events into `out`. The default reports none.
+    fn drain_events(&mut self, _out: &mut Vec<Event>) {}
 }
 
 /// Decodes packets into audio.
@@ -27,4 +29,6 @@ pub trait Decoder: Send {
     fn decode(&mut self, packet: &Packet, out: &mut AudioBuffer) -> Result<()>;
     /// Clears internal state (e.g. after a seek).
     fn reset(&mut self);
+    /// Moves pending diagnostic events into `out`. The default reports none.
+    fn drain_events(&mut self, _out: &mut Vec<Event>) {}
 }

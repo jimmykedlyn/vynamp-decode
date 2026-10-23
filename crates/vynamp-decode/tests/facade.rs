@@ -26,7 +26,10 @@ fn random_bytes_are_unsupported() {
 #[cfg(feature = "pcm")]
 mod pcm_decoding {
     use super::*;
-    use vynamp_decode_core::{AudioBuffer, Packet, SeekTo, SliceSource, Track};
+    use vynamp_decode_core::{
+        AudioBuffer, CodecDescriptor, Decoder, Event, GaplessKind, Packet, SampleFormat, SeekTo,
+        SliceSource, Track,
+    };
     #[cfg(feature = "aiff")]
     use vynamp_decode_testkit::writers::aiff;
     #[cfg(feature = "riff")]
@@ -108,6 +111,7 @@ mod pcm_decoding {
                     frames,
                     delay,
                     padding,
+                    gapless: GaplessKind::Exact,
                     codec_private: Vec::new(),
                 }],
                 next: 0,
@@ -204,6 +208,112 @@ mod pcm_decoding {
 
     fn synth_reader(opts: Options) -> Reader {
         synth_reader_with(b"SYNxxxxxxxx", opts)
+    }
+
+    // ---- events and pts resync ----
+
+    #[cfg(feature = "aiff")]
+    #[test]
+    fn resilient_aiff_clamp_is_reported_once() {
+        use vynamp_decode_core::Mode;
+        let s = samples(11, 2);
+        let bytes: Vec<u8> = s.iter().flat_map(|v| v.to_be_bytes()).collect();
+        let spec = PcmSpec {
+            endian: Endian::Big,
+            ..SPEC16
+        };
+        let mut file = aiff(spec, 48000, 2, &bytes[..40], None);
+        // COMM frame count lives at offset 22.
+        file[22..26].copy_from_slice(&11u32.to_be_bytes());
+
+        let resilient = Options {
+            mode: Mode::Resilient,
+            ..Options::default()
+        };
+        let mut r = open(Box::new(VecSource::new(file.clone())), resilient).unwrap();
+        assert_eq!(drain_i16(&mut r, 2)[0].len(), 10);
+        assert_eq!(
+            r.take_events(),
+            [Event::Clamped {
+                what: "comm frames",
+                declared: 11,
+                actual: 10,
+            }]
+        );
+        assert!(r.take_events().is_empty());
+
+        let e = open(Box::new(VecSource::new(file)), Options::default())
+            .err()
+            .unwrap();
+        assert!(matches!(
+            e,
+            Error::Invalid {
+                what: "comm frames exceed ssnd",
+                ..
+            }
+        ));
+    }
+
+    /// Stands in for a decoder that produces fewer frames than `packet.frames`
+    /// for the packet at pts 64.
+    struct ShortDecoder;
+
+    impl Decoder for ShortDecoder {
+        fn decode(&mut self, p: &Packet, out: &mut AudioBuffer) -> Result<()> {
+            let n = if p.pts == 64 { 40 } else { p.frames as usize };
+            out.reset(SampleFormat::I16, 1, n)?;
+            let plane = out.plane_i16_mut(0).unwrap();
+            for (i, v) in plane.iter_mut().enumerate() {
+                *v = (p.pts + i as u64) as i16;
+            }
+            Ok(())
+        }
+        fn reset(&mut self) {}
+    }
+
+    const GAP_SPEC: PcmSpec = PcmSpec {
+        valid_bits: 15,
+        ..SPEC16
+    };
+
+    fn gap_open(_: Box<dyn Source>, _: &Options) -> Result<Box<dyn Demuxer>> {
+        let mut s = Synth::with(Some(TOTAL), 200, 0);
+        s.tracks[0].codec = CodecId::Pcm(GAP_SPEC);
+        Ok(Box::new(s))
+    }
+
+    static GAP: ContainerDescriptor = ContainerDescriptor {
+        name: "gap",
+        extensions: &[],
+        verification: Verification::Experimental,
+        probe: |h| if h.starts_with(b"GAP") { 50 } else { 0 },
+        open: gap_open,
+    };
+
+    static GAP_CODEC: CodecDescriptor = CodecDescriptor {
+        name: "gap",
+        verification: Verification::Experimental,
+        supports: |id| *id == CodecId::Pcm(GAP_SPEC),
+        make: |_, _| Ok(Box::new(ShortDecoder)),
+    };
+
+    #[test]
+    fn short_decoder_output_does_not_shift_later_packets() {
+        let mut reg = Registry::new();
+        reg.add_container(&GAP);
+        reg.add_codec(&GAP_CODEC);
+        let mut r = Reader::open_with(
+            &reg,
+            Box::new(SliceSource::new(b"GAPxxxxxxxx")),
+            Options::default(),
+            None,
+        )
+        .unwrap();
+        let got = drain_i16(&mut r, 1);
+        // Delay 200: the first audible frame is source frame 200. Packet 64 is
+        // short (frames 64..104, before the delay) and must not skew the rest.
+        let want: Vec<i16> = (200..1000).collect();
+        assert_eq!(got[0], want);
     }
 
     #[test]

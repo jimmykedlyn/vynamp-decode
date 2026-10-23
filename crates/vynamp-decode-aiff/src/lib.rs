@@ -31,8 +31,8 @@ pub mod extended;
 
 use comm::{COMM_READ, Comm};
 use vynamp_decode_core::{
-    ByteReader, CancelToken, CodecId, Demuxer, Error, LimitKind, Mode, Options, Packet, Result,
-    SeekTo, Source, Track,
+    ByteReader, CancelToken, CodecId, Demuxer, Error, Event, GaplessKind, LimitKind, Mode, Options,
+    Packet, Result, SeekTo, Source, Track,
 };
 
 /// Maximum frames per packet.
@@ -62,6 +62,7 @@ pub struct AiffDemuxer {
     total: u64,
     /// Frames already returned (position of the next packet).
     next_frame: u64,
+    events: Vec<Event>,
 }
 
 fn read_full(src: &mut dyn Source, buf: &mut [u8]) -> Result<usize> {
@@ -104,6 +105,14 @@ pub fn open_aiff(mut src: Box<dyn Source>, opts: &Options) -> Result<AiffDemuxer
             offset: ssnd.header,
         });
     }
+    let mut events = Vec::new();
+    if total < u64::from(comm.frames) {
+        events.push(Event::Clamped {
+            what: "comm frames",
+            declared: u64::from(comm.frames),
+            actual: total,
+        });
+    }
     opts.limits.check_frames(total)?;
     src.seek(ssnd.data_start)?;
     let track = Track {
@@ -115,6 +124,7 @@ pub fn open_aiff(mut src: Box<dyn Source>, opts: &Options) -> Result<AiffDemuxer
         frames: Some(total),
         delay: 0,
         padding: 0,
+        gapless: GaplessKind::Exact,
         codec_private: Vec::new(),
     };
     Ok(AiffDemuxer {
@@ -126,6 +136,7 @@ pub fn open_aiff(mut src: Box<dyn Source>, opts: &Options) -> Result<AiffDemuxer
         data_start: ssnd.data_start,
         total,
         next_frame: 0,
+        events,
     })
 }
 
@@ -254,6 +265,7 @@ impl Demuxer for AiffDemuxer {
         }
         out.track = 0;
         out.pts = self.next_frame;
+        out.offset = self.src.position().saturating_sub(got as u64);
         out.frames = whole as u32;
         self.next_frame += whole;
         Ok(true)
@@ -274,5 +286,9 @@ impl Demuxer for AiffDemuxer {
         self.src.seek(pos)?;
         self.next_frame = frame;
         Ok(SeekTo { frame, preroll: 0 })
+    }
+
+    fn drain_events(&mut self, out: &mut Vec<Event>) {
+        out.append(&mut self.events);
     }
 }

@@ -707,3 +707,25 @@ fn byte_flip_and_truncation_smoke() {
         }
     }
 }
+
+#[test]
+fn comm_frames_beyond_ssnd_emits_clamped() {
+    use vynamp_decode_core::Event;
+    let data = samples(s16(), 2, 11);
+    let mut f = aiff(s16(), RATE, 2, &data[..40], None);
+    patch(&mut f, 22, &11u32.to_be_bytes());
+    let mut d = open(f, &resilient()).unwrap();
+    let mut ev = Vec::new();
+    d.drain_events(&mut ev);
+    assert_eq!(
+        ev,
+        [Event::Clamped {
+            what: "comm frames",
+            declared: 11,
+            actual: 10,
+        }]
+    );
+    ev.clear();
+    d.drain_events(&mut ev);
+    assert!(ev.is_empty());
+}

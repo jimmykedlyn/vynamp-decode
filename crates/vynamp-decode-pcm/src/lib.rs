@@ -96,7 +96,7 @@ impl Decoder for PcmDecoder {
         let frames = packet.frames as usize;
         let invalid = Error::Invalid {
             what: "pcm packet size",
-            offset: 0,
+            offset: packet.offset,
         };
         let expected = frames
             .checked_mul(self.bytes_per_frame)
