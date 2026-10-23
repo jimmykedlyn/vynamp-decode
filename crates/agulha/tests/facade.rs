@@ -261,3 +261,9 @@ fn codec_lookup() {
     assert!(reg.codec_for(&CodecId::Flac).is_none());
     assert_eq!(reg.containers().count(), 2);
 }
+
+#[test]
+fn reader_is_send() {
+    fn assert_send<T: Send>() {}
+    assert_send::<Reader>();
+}

@@ -4,7 +4,7 @@ use crate::Result;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 
 /// A seekable byte source.
-pub trait Source {
+pub trait Source: Send {
     /// Reads up to `buf.len()` bytes, returning the count (0 at end of data).
     fn read(&mut self, buf: &mut [u8]) -> Result<usize>;
     /// Moves to the absolute position `pos`. Positions past the end are allowed;

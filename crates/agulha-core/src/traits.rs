@@ -12,7 +12,7 @@ pub struct SeekTo {
 }
 
 /// Splits a container into packets.
-pub trait Demuxer {
+pub trait Demuxer: Send {
     /// Tracks found in the container.
     fn tracks(&self) -> &[Track];
     /// Reads the next packet into `out`; returns `false` at end of stream.
@@ -22,7 +22,7 @@ pub trait Demuxer {
 }
 
 /// Decodes packets into audio.
-pub trait Decoder {
+pub trait Decoder: Send {
     /// Decodes `packet` into `out`.
     fn decode(&mut self, packet: &Packet, out: &mut AudioBuffer) -> Result<()>;
     /// Clears internal state (e.g. after a seek).
