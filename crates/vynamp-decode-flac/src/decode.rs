@@ -5,8 +5,8 @@ use crate::frame::{ChannelAssignment, parse_frame_header};
 use crate::metadata::STREAMINFO_LEN;
 use crate::subframe::decode_subframe;
 use vynamp_decode_core::{
-    AudioBuffer, BitReader, CodecId, Decoder, Error, LimitKind, Limits, Options, Packet, Result,
-    SampleFormat, Track,
+    AudioBuffer, BitReader, CodecId, Decoder, Error, Event, LimitKind, Limits, Md5, Mode, Options,
+    Packet, Result, SampleFormat, Track,
 };
 
 /// Decodes FLAC packets (one frame each, as produced by `FlacDemuxer`) into planar audio.
@@ -15,12 +15,36 @@ use vynamp_decode_core::{
 /// in the buffer, which is `U8` up to 8 bits, `I16` up to 16, `I24` up to 24 and `I32`
 /// above. An empty packet is a Resilient silence packet of `packet.frames` frames.
 /// The decoder trusts the demuxer's CRC-16 check and ignores bytes after the frame.
+///
+/// When STREAMINFO carries a nonzero MD5 and total sample count, and the stream is decoded
+/// from sample 0 without a seek or a silence packet, the decoded samples are hashed and
+/// compared with it once `total_samples` have been decoded. A mismatch is an
+/// `Invalid { what: "flac md5" }` error from that `decode` call in `Mode::Strict`, and an
+/// `Event::ChecksumMismatch` (see `drain_events`) in `Mode::Resilient`.
 pub struct FlacDecoder {
     info: StreamInfo,
     format: SampleFormat,
     channels: u16,
     /// One scratch plane per channel, `max_block` samples each.
     planes: Vec<Vec<i64>>,
+    mode: Mode,
+    md5: Md5Check,
+    events: Vec<Event>,
+}
+
+/// State of the STREAMINFO MD5 verification.
+struct Md5Check {
+    /// Whether samples are still being hashed.
+    active: bool,
+    /// Whether the first packet has been seen (it must start at sample 0).
+    started: bool,
+    hasher: Md5,
+    /// Frames hashed so far.
+    hashed: u64,
+    /// Bytes per sample in the hash input.
+    width: usize,
+    /// Reusable byte buffer for one packet's hash input.
+    scratch: Vec<u8>,
 }
 
 /// Shifts the offset of an `Invalid` error by `base` (the absolute position the
@@ -96,7 +120,27 @@ impl FlacDecoder {
             p.resize(usize::from(info.max_block), 0i64);
             planes.push(p);
         }
+        let verify = info.md5 != [0; 16] && info.total_samples > 0;
+        let width = usize::from(info.bits_per_sample).div_ceil(8);
+        let mut scratch = Vec::new();
+        if verify {
+            let bytes = samples * width;
+            limits.check_bytes(bytes as u64)?;
+            scratch
+                .try_reserve_exact(bytes)
+                .map_err(|_| Error::Limit(LimitKind::Bytes))?;
+        }
         Ok(Self {
+            mode: opts.mode,
+            md5: Md5Check {
+                active: verify,
+                started: false,
+                hasher: Md5::new(),
+                hashed: 0,
+                width,
+                scratch,
+            },
+            events: Vec::new(),
             format: format_for(info.bits_per_sample),
             channels: u16::from(info.channels),
             info,
@@ -117,8 +161,52 @@ impl FlacDecoder {
     }
 }
 
-impl Decoder for FlacDecoder {
-    fn decode(&mut self, packet: &Packet, out: &mut AudioBuffer) -> Result<()> {
+impl FlacDecoder {
+    /// Hashes the `frames` samples just decoded into `planes` and, on reaching
+    /// `total_samples`, compares the digest with STREAMINFO's.
+    fn verify(&mut self, frames: usize, offset: u64) -> Result<()> {
+        // RFC 9639, section 8.2: "The MD5 checksum is computed over the audio samples ...
+        // interleaved ... each sample as a little-endian signed integer of ceil(bits per
+        // sample / 8) bytes" (for 8-bit audio this is the signed value, not the U8 offset
+        // form stored in the output buffer).
+        let m = &mut self.md5;
+        m.scratch.clear();
+        for i in 0..frames {
+            for plane in &self.planes {
+                m.scratch
+                    .extend_from_slice(&plane[i].to_le_bytes()[..m.width]);
+            }
+        }
+        m.hasher.update(&m.scratch);
+        m.hashed += frames as u64;
+        match m.hashed.cmp(&self.info.total_samples) {
+            std::cmp::Ordering::Less => Ok(()),
+            // More samples than declared: the digest cannot be compared.
+            std::cmp::Ordering::Greater => {
+                m.active = false;
+                Ok(())
+            }
+            std::cmp::Ordering::Equal => {
+                m.active = false;
+                if std::mem::take(&mut m.hasher).finish() == self.info.md5 {
+                    return Ok(());
+                }
+                match self.mode {
+                    Mode::Strict => Err(Error::Invalid {
+                        what: "flac md5",
+                        offset,
+                    }),
+                    Mode::Resilient => {
+                        self.events
+                            .push(Event::ChecksumMismatch { what: "flac md5" });
+                        Ok(())
+                    }
+                }
+            }
+        }
+    }
+
+    fn decode_packet(&mut self, packet: &Packet, out: &mut AudioBuffer) -> Result<()> {
         if packet.data.is_empty() {
             return self.silence(packet.frames as usize, out);
         }
@@ -194,8 +282,34 @@ impl Decoder for FlacDecoder {
                 offset: packet.offset,
             });
         }
+        if self.md5.active {
+            self.verify(frames, packet.offset)?;
+        }
         Ok(())
     }
+}
 
-    fn reset(&mut self) {}
+impl Decoder for FlacDecoder {
+    fn decode(&mut self, packet: &Packet, out: &mut AudioBuffer) -> Result<()> {
+        // Only a stream decoded from its very first sample can match the MD5.
+        if !self.md5.started {
+            self.md5.started = true;
+            self.md5.active &= packet.pts == 0;
+        }
+        // A silence packet stands for lost samples.
+        self.md5.active &= !packet.data.is_empty();
+        let result = self.decode_packet(packet, out);
+        if result.is_err() {
+            self.md5.active = false;
+        }
+        result
+    }
+
+    fn reset(&mut self) {
+        self.md5.active = false;
+    }
+
+    fn drain_events(&mut self, out: &mut Vec<Event>) {
+        out.append(&mut self.events);
+    }
 }

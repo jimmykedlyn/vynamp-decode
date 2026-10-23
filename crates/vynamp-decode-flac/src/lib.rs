@@ -20,7 +20,8 @@
 //!
 //! `FlacDecoder` decodes one packet (one frame) at a time: subframes (constant, verbatim,
 //! fixed, LPC), Rice residuals and stereo decorrelation, bit-exactly; an empty packet
-//! decodes to silence.
+//! decodes to silence. When STREAMINFO has an MD5, a stream decoded from sample 0 without a
+//! seek is verified against it (`Invalid` in Strict, `Event::ChecksumMismatch` in Resilient).
 #![warn(missing_docs)]
 
 mod decode;
