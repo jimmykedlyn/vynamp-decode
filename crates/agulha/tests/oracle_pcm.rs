@@ -8,8 +8,13 @@
 //! conversion in the corpus turned out exact, so all comparisons are strict.
 
 use agulha::{AudioBuffer, Options, SampleFormat, open_path};
+use agulha_testkit::signal::sine_i32;
 use agulha_testkit::{hex, sha256};
 use std::path::{Path, PathBuf};
+
+/// SHA-256 of `tools/fixtures/source-sine.wav`, the input every corpus file is
+/// derived from. Regenerating the source requires updating this and the corpus.
+const SOURCE_SHA256: &str = "2c42c1269bd909f4610e136466cb7e22b5956d46c07cb65d5fcf5d20c4cefdc5";
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -57,15 +62,15 @@ fn decode(path: &Path) -> Decoded {
     }
 }
 
-/// Expected value and tolerance (in target units, currently always zero) of source sample `x` (s32).
-fn convert(x: i32, spec: &str) -> (f64, f64) {
+/// Expected value of source sample `x` (s32) after conversion to `spec`.
+fn convert(x: i32, spec: &str) -> f64 {
     let x = i64::from(x);
     match spec {
-        "u8" => ((x >> 24) as f64 + 128.0, 0.0),
-        "s16le" | "s16be" => ((x >> 16) as f64, 0.0),
-        "s24le" | "s24be" => ((x >> 8) as f64, 0.0),
-        "s32le" => (x as f64, 0.0),
-        "f32le" | "f32be" | "f64le" => (x as f64 / 2147483648.0, 0.0),
+        "u8" => (x >> 24) as f64 + 128.0,
+        "s16le" | "s16be" => (x >> 16) as f64,
+        "s24le" | "s24be" => (x >> 8) as f64,
+        "s32le" => x as f64,
+        "f32le" | "f32be" | "f64le" => x as f64 / 2147483648.0,
         other => panic!("unknown spec {other}"),
     }
 }
@@ -91,6 +96,25 @@ fn source_is_the_documented_signal() {
     );
     assert!(src.planes.iter().all(|p| p.len() == 4800));
     assert!(src.planes.iter().flatten().all(|v| (*v as i64) % 256 == 0));
+}
+
+/// The source is checked against an independently computed signal (the same
+/// parameters as `gen_source_sine`), not just against itself, and its bytes
+/// are pinned so the corpus cannot silently drift.
+#[test]
+fn source_matches_the_independent_signal_and_pinned_hash() {
+    let path = root().join("tools/fixtures/source-sine.wav");
+    let bytes = std::fs::read(&path).expect("source-sine.wav");
+    assert_eq!(hex(&sha256(&bytes)), SOURCE_SHA256, "source sha256");
+
+    let src = decode(&path);
+    for (plane, freq) in src.planes.iter().zip([997.0, 1499.0]) {
+        let want = sine_i32(48000, freq, 4800, 24);
+        assert_eq!(plane.len(), want.len());
+        for (i, (&got, &w)) in plane.iter().zip(&want).enumerate() {
+            assert_eq!(got, f64::from(w << 8), "{freq} Hz, frame {i}");
+        }
+    }
 }
 
 #[test]
@@ -126,11 +150,8 @@ fn manifest_files_decode_to_the_source() {
             // Channel c carries source channel c % 2 (see generate.ps1).
             for (i, &v) in plane.iter().enumerate() {
                 let x = source.planes[c % 2][i] as i32;
-                let (want, tol) = convert(x, spec);
-                assert!(
-                    (v - want).abs() <= tol,
-                    "{name}: channel {c} frame {i}: got {v}, want {want} (+-{tol})"
-                );
+                let want = convert(x, spec);
+                assert_eq!(v, want, "{name}: channel {c} frame {i}");
             }
         }
         rows += 1;

@@ -40,7 +40,7 @@ foreach ($c in $cases) {
   $name, $ch, $spec, $extra = $c
   $dst = Join-Path $out $name
   Remove-Item -Force -ErrorAction SilentlyContinue $dst
-  & $FFmpeg -v error -y -bitexact -i $src @extra $dst
+  & $FFmpeg -v error -y -i $src -bitexact @extra $dst
   if ($LASTEXITCODE -ne 0) { throw "ffmpeg failed for $name" }
   $sha = (Get-FileHash -Algorithm SHA256 $dst).Hash.ToLower()
   $rows += "$name|$sha|48000|$ch|$spec|4800|$gen"
