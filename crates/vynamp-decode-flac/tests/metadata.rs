@@ -307,20 +307,6 @@ fn truncated_metadata_is_eof() {
 }
 
 #[test]
-fn frames_are_not_supported_yet() {
-    let mut d = open(minimal(), &Options::default()).unwrap();
-    let mut p = Packet::default();
-    assert!(matches!(
-        d.next_packet(&mut p),
-        Err(Error::Unsupported("flac frames"))
-    ));
-    assert!(matches!(
-        d.seek(0, 0),
-        Err(Error::Unsupported("flac frames"))
-    ));
-}
-
-#[test]
 fn byte_flip_and_truncation_smoke() {
     let file = stream(&[
         block(0, false, &std_body()),
