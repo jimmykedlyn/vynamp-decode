@@ -1,9 +1,11 @@
 //! Core types shared by all vynamp-decode crates.
 #![warn(missing_docs)]
 
+mod bits;
 mod buffer;
 mod bytes;
 mod cancel;
+mod crc;
 mod error;
 mod event;
 mod limits;
@@ -14,9 +16,11 @@ mod source;
 mod track;
 mod traits;
 
+pub use bits::BitReader;
 pub use buffer::AudioBuffer;
 pub use bytes::ByteReader;
 pub use cancel::{CancelSource, CancelToken};
+pub use crc::{crc8, crc16};
 pub use error::{Error, LimitKind, Result};
 pub use event::Event;
 pub use limits::{Limits, Mode, Options};
