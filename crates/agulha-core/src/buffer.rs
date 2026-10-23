@@ -279,7 +279,7 @@ mod tests {
         assert_eq!(b.frames(), 0);
         assert!(b.plane_i16(0).is_none());
         assert_eq!(
-            b.reset(SampleFormat::F64, 2, 1 << 40),
+            b.reset(SampleFormat::F64, 2, usize::MAX / 2),
             Err(Error::Limit(LimitKind::Frames))
         );
         assert_eq!(b.frames(), 0);
@@ -291,9 +291,10 @@ mod tests {
     fn i24_i32_share_storage() {
         let mut b = AudioBuffer::new();
         b.reset(SampleFormat::I24, 1, 4).unwrap();
-        let p = b.plane_i32(0).unwrap().as_ptr();
+        b.plane_i32_mut(0).unwrap().copy_from_slice(&[7, 8, 9, 10]);
+        // Reused storage keeps its old contents; fresh storage would be zeroed.
         b.reset(SampleFormat::I32, 1, 4).unwrap();
-        assert_eq!(b.plane_i32(0).unwrap().as_ptr(), p);
+        assert_eq!(b.plane_i32(0).unwrap(), &[7, 8, 9, 10]);
     }
 
     #[test]
