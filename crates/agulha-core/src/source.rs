@@ -1,6 +1,6 @@
 //! Byte sources: in-memory slices, owned vectors and files.
 
-use crate::{Error, Result};
+use crate::Result;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 
 /// A seekable byte source.
@@ -102,8 +102,8 @@ pub struct FileSource {
 impl FileSource {
     /// Opens `path` for reading (64 KiB internal buffer).
     pub fn open(path: &std::path::Path) -> Result<Self> {
-        let file = std::fs::File::open(path).map_err(|e| Error::Io(e.kind()))?;
-        let len = file.metadata().map_err(|e| Error::Io(e.kind()))?.len();
+        let file = std::fs::File::open(path)?;
+        let len = file.metadata()?.len();
         Ok(Self {
             reader: BufReader::with_capacity(64 * 1024, file),
             pos: 0,
@@ -121,14 +121,17 @@ impl Source for FileSource {
                     return Ok(n);
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
-                Err(e) => return Err(Error::Io(e.kind())),
+                Err(e) => return Err(e.into()),
             }
         }
     }
     fn seek(&mut self, pos: u64) -> Result<()> {
-        self.reader
-            .seek(SeekFrom::Start(pos))
-            .map_err(|e| Error::Io(e.kind()))?;
+        match i64::try_from(i128::from(pos) - i128::from(self.pos)) {
+            Ok(delta) => self.reader.seek_relative(delta)?,
+            Err(_) => {
+                self.reader.seek(SeekFrom::Start(pos))?;
+            }
+        }
         self.pos = pos;
         Ok(())
     }

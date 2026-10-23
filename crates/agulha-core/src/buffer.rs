@@ -1,6 +1,6 @@
 //! Planar audio buffer.
 
-use crate::SampleFormat;
+use crate::{Error, LimitKind, Result, SampleFormat};
 
 #[derive(Debug)]
 enum Data {
@@ -51,10 +51,14 @@ macro_rules! plane {
     )*};
 }
 
-fn prepare<T: Copy + Default>(v: &mut Vec<T>, need: usize) {
+fn prepare<T: Copy + Default>(v: &mut Vec<T>, need: usize) -> bool {
     if v.len() < need {
+        if v.try_reserve_exact(need - v.len()).is_err() {
+            return false;
+        }
         v.resize(need, T::default());
     }
+    true
 }
 
 fn shift<T: Copy>(v: &mut [T], channels: usize, frames: usize, stride: usize, n: usize) {
@@ -77,16 +81,28 @@ impl AudioBuffer {
 
     /// Prepares the buffer for `frames` frames of `channels` channels in `format`.
     ///
-    /// Reallocates only if the existing storage is too small or the format
-    /// changes. Contents are unspecified afterwards. Callers must validate
-    /// sizes against [`Limits`](crate::Limits) first; a `channels * frames`
-    /// that overflows `usize` is a caller bug and panics.
-    pub fn reset(&mut self, format: SampleFormat, channels: u16, frames: usize) {
+    /// Reallocates only if the existing storage is too small or the storage
+    /// type changes (I24 and I32 share storage). Contents are unspecified
+    /// afterwards. If `channels * frames` overflows or the allocation fails,
+    /// returns `Err(Error::Limit(LimitKind::Frames))` and leaves the buffer
+    /// empty (`frames() == 0`).
+    pub fn reset(&mut self, format: SampleFormat, channels: u16, frames: usize) -> Result<()> {
+        self.channels = 0;
+        self.frames = 0;
+        self.stride = 0;
+        let fail = Error::Limit(LimitKind::Frames);
         let need = usize::from(channels)
             .checked_mul(frames)
-            .expect("channels * frames overflows usize; check Limits first");
-        let same = self.format == format && !matches!(self.data, Data::Empty);
-        if !same {
+            .ok_or(fail.clone())?;
+        let reusable = matches!(
+            (&self.data, format),
+            (Data::U8(_), SampleFormat::U8)
+                | (Data::I16(_), SampleFormat::I16)
+                | (Data::I32(_), SampleFormat::I24 | SampleFormat::I32)
+                | (Data::F32(_), SampleFormat::F32)
+                | (Data::F64(_), SampleFormat::F64)
+        );
+        if !reusable {
             self.data = match format {
                 SampleFormat::U8 => Data::U8(Vec::new()),
                 SampleFormat::I16 => Data::I16(Vec::new()),
@@ -95,18 +111,23 @@ impl AudioBuffer {
                 SampleFormat::F64 => Data::F64(Vec::new()),
             };
         }
-        match &mut self.data {
-            Data::Empty => {}
+        let ok = match &mut self.data {
+            Data::Empty => true,
             Data::U8(v) => prepare(v, need),
             Data::I16(v) => prepare(v, need),
             Data::I32(v) => prepare(v, need),
             Data::F32(v) => prepare(v, need),
             Data::F64(v) => prepare(v, need),
+        };
+        if !ok {
+            self.data = Data::Empty;
+            return Err(fail);
         }
         self.format = format;
         self.channels = channels;
         self.frames = frames;
         self.stride = frames;
+        Ok(())
     }
 
     /// Current sample format.
@@ -187,7 +208,7 @@ mod tests {
     #[test]
     fn planar_layout() {
         let mut b = AudioBuffer::new();
-        b.reset(SampleFormat::I16, 2, 4);
+        b.reset(SampleFormat::I16, 2, 4).unwrap();
         b.plane_i16_mut(0).unwrap().copy_from_slice(&[1, 2, 3, 4]);
         b.plane_i16_mut(1).unwrap().copy_from_slice(&[5, 6, 7, 8]);
         assert_eq!(b.plane_i16(0).unwrap(), &[1, 2, 3, 4]);
@@ -203,9 +224,9 @@ mod tests {
     #[test]
     fn reset_does_not_reallocate() {
         let mut b = AudioBuffer::new();
-        b.reset(SampleFormat::I16, 2, 4);
+        b.reset(SampleFormat::I16, 2, 4).unwrap();
         let p = b.plane_i16(0).unwrap().as_ptr();
-        b.reset(SampleFormat::I16, 2, 2);
+        b.reset(SampleFormat::I16, 2, 2).unwrap();
         assert_eq!(b.plane_i16(0).unwrap().as_ptr(), p);
         assert_eq!(b.frames(), 2);
     }
@@ -213,7 +234,7 @@ mod tests {
     #[test]
     fn truncate() {
         let mut b = AudioBuffer::new();
-        b.reset(SampleFormat::I16, 2, 4);
+        b.reset(SampleFormat::I16, 2, 4).unwrap();
         b.plane_i16_mut(0).unwrap().copy_from_slice(&[1, 2, 3, 4]);
         b.plane_i16_mut(1).unwrap().copy_from_slice(&[1, 2, 3, 4]);
         b.truncate_front(1);
@@ -229,21 +250,67 @@ mod tests {
     fn to_f32() {
         let mut b = AudioBuffer::new();
         let mut out = Vec::new();
-        b.reset(SampleFormat::I24, 1, 2);
+        b.reset(SampleFormat::I24, 1, 2).unwrap();
         b.plane_i32_mut(0)
             .unwrap()
             .copy_from_slice(&[-8_388_608, 8_388_607]);
         b.to_f32_interleaved(&mut out);
         assert_eq!(out[0], -1.0);
         assert!((out[1] - 0.999_999_9).abs() < 1e-7);
-        b.reset(SampleFormat::U8, 1, 3);
+        b.reset(SampleFormat::U8, 1, 3).unwrap();
         b.plane_u8_mut(0).unwrap().copy_from_slice(&[0, 128, 255]);
         b.to_f32_interleaved(&mut out);
         assert_eq!(out, [-1.0, 0.0, 0.992_187_5]);
-        b.reset(SampleFormat::I16, 2, 1);
+        b.reset(SampleFormat::I16, 2, 1).unwrap();
         b.plane_i16_mut(0).unwrap()[0] = 16384;
         b.plane_i16_mut(1).unwrap()[0] = -32768;
         b.to_f32_interleaved(&mut out);
         assert_eq!(out, [0.5, -1.0]);
+    }
+
+    #[test]
+    fn reset_overflow_and_huge() {
+        let mut b = AudioBuffer::new();
+        b.reset(SampleFormat::I16, 2, 4).unwrap();
+        assert_eq!(
+            b.reset(SampleFormat::I16, 2, usize::MAX),
+            Err(Error::Limit(LimitKind::Frames))
+        );
+        assert_eq!(b.frames(), 0);
+        assert!(b.plane_i16(0).is_none());
+        assert_eq!(
+            b.reset(SampleFormat::F64, 2, 1 << 40),
+            Err(Error::Limit(LimitKind::Frames))
+        );
+        assert_eq!(b.frames(), 0);
+        b.reset(SampleFormat::I16, 1, 2).unwrap();
+        assert_eq!(b.frames(), 2);
+    }
+
+    #[test]
+    fn i24_i32_share_storage() {
+        let mut b = AudioBuffer::new();
+        b.reset(SampleFormat::I24, 1, 4).unwrap();
+        let p = b.plane_i32(0).unwrap().as_ptr();
+        b.reset(SampleFormat::I32, 1, 4).unwrap();
+        assert_eq!(b.plane_i32(0).unwrap().as_ptr(), p);
+    }
+
+    #[test]
+    fn to_f32_other_formats() {
+        let mut b = AudioBuffer::new();
+        let mut out = Vec::new();
+        b.reset(SampleFormat::I32, 1, 2).unwrap();
+        b.plane_i32_mut(0).unwrap().copy_from_slice(&[i32::MIN, 0]);
+        b.to_f32_interleaved(&mut out);
+        assert_eq!(out, [-1.0, 0.0]);
+        b.reset(SampleFormat::F32, 1, 2).unwrap();
+        b.plane_f32_mut(0).unwrap().copy_from_slice(&[0.25, -0.5]);
+        b.to_f32_interleaved(&mut out);
+        assert_eq!(out, [0.25, -0.5]);
+        b.reset(SampleFormat::F64, 1, 2).unwrap();
+        b.plane_f64_mut(0).unwrap().copy_from_slice(&[0.125, -1.0]);
+        b.to_f32_interleaved(&mut out);
+        assert_eq!(out, [0.125, -1.0]);
     }
 }
