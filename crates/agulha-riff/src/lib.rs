@@ -192,10 +192,7 @@ impl Demuxer for RiffDemuxer {
 
     fn seek(&mut self, track: u32, frame: u64) -> Result<SeekTo> {
         if track != 0 {
-            return Err(Error::Invalid {
-                what: "track",
-                offset: self.src.position(),
-            });
+            return Err(Error::Unsupported("track"));
         }
         let frame = self.total.map_or(frame, |t| frame.min(t));
         let pos = frame

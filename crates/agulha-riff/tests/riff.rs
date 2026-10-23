@@ -384,6 +384,20 @@ fn seek_exact_and_end() {
 }
 
 #[test]
+fn seek_on_unknown_track_is_unsupported() {
+    let s = spec(PcmEncoding::Signed, 16);
+    for variant in VARIANTS {
+        let file = wav(s, RATE, 2, &samples(s, 2, 100), variant);
+        let mut d = open(file, &Options::default()).unwrap();
+        assert_eq!(
+            d.seek(1, 0),
+            Err(Error::Unsupported("track")),
+            "{variant:?}"
+        );
+    }
+}
+
+#[test]
 fn packet_buffer_is_reused() {
     let s = spec(PcmEncoding::Signed, 16);
     let file = wav(s, RATE, 2, &samples(s, 2, 9000), WavVariant::Riff);

@@ -655,7 +655,7 @@ fn seek_exact_and_end() {
     d.seek(0, 0).unwrap();
     assert!(d.next_packet(&mut p).unwrap());
     assert_eq!(p.pts, 0);
-    assert!(matches!(d.seek(1, 0), Err(Error::Invalid { .. })));
+    assert_eq!(d.seek(1, 0), Err(Error::Unsupported("track")));
 }
 
 #[test]
