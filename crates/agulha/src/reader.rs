@@ -20,6 +20,8 @@ pub struct Reader {
     skip_until: u64,
     /// Frames at or beyond this demuxer position are discarded (if known).
     end: Option<u64>,
+    /// Next frame index on the trimmed output timeline.
+    out_pos: u64,
 }
 
 impl Reader {
@@ -56,6 +58,7 @@ impl Reader {
             pos: 0,
             skip_until: delay,
             end,
+            out_pos: 0,
             track,
         })
     }
@@ -65,17 +68,32 @@ impl Reader {
         &self.track
     }
 
+    /// Length of the trimmed output in frames (declared frames minus delay and
+    /// padding, saturating), or `None` if the track length is unknown.
+    pub fn frames(&self) -> Option<u64> {
+        self.end
+            .map(|e| e.saturating_sub(u64::from(self.track.delay)))
+    }
+
+    /// Index of the next output frame on the trimmed timeline; updated by
+    /// [`read`](Self::read) and [`seek`](Self::seek).
+    pub fn position(&self) -> u64 {
+        self.out_pos
+    }
+
     /// Decodes the next chunk into `out`.
     ///
     /// Returns `Ok(true)` with at least one frame in `out`, or `Ok(false)` at
-    /// the end of the stream.
+    /// the end of the stream, in which case `out` is left empty.
     pub fn read(&mut self, out: &mut AudioBuffer) -> Result<bool> {
         loop {
             self.cancel.check()?;
             if self.end.is_some_and(|e| self.pos >= e) {
+                out.truncate_back(out.frames());
                 return Ok(false);
             }
             if !self.demuxer.next_packet(&mut self.packet)? {
+                out.truncate_back(out.frames());
                 return Ok(false);
             }
             self.decoder.decode(&self.packet, out)?;
@@ -90,6 +108,7 @@ impl Reader {
             out.truncate_back(back as usize);
             out.truncate_front(front as usize);
             if out.frames() > 0 {
+                self.out_pos = self.out_pos.saturating_add(out.frames() as u64);
                 return Ok(true);
             }
         }
@@ -101,6 +120,7 @@ impl Reader {
         let to = self.demuxer.seek(self.track.id, target)?;
         self.decoder.reset();
         self.pos = to.frame;
+        self.out_pos = self.frames().map_or(frame, |len| frame.min(len));
         self.skip_until = to
             .frame
             .saturating_add(to.preroll)

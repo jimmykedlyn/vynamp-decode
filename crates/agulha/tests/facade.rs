@@ -80,6 +80,12 @@ struct Synth {
 
 impl Synth {
     fn new() -> Self {
+        Self::with(Some(TOTAL), 100, 50)
+    }
+
+    /// The demuxer always holds `TOTAL` frames; `frames`, `delay` and
+    /// `padding` are what the track declares.
+    fn with(frames: Option<u64>, delay: u32, padding: u32) -> Self {
         Synth {
             tracks: vec![Track {
                 id: 0,
@@ -87,9 +93,9 @@ impl Synth {
                 sample_rate: 8000,
                 channels: 1,
                 channel_mask: 0,
-                frames: Some(TOTAL),
-                delay: 100,
-                padding: 50,
+                frames,
+                delay,
+                padding,
                 codec_private: Vec::new(),
             }],
             next: 0,
@@ -131,6 +137,14 @@ fn synth_open(_: Box<dyn Source>, _: &Options) -> Result<Box<dyn Demuxer>> {
     Ok(Box::new(Synth::new()))
 }
 
+fn synth_open_short(_: Box<dyn Source>, _: &Options) -> Result<Box<dyn Demuxer>> {
+    Ok(Box::new(Synth::with(Some(100), 80, 40)))
+}
+
+fn synth_open_unknown_len(_: Box<dyn Source>, _: &Options) -> Result<Box<dyn Demuxer>> {
+    Ok(Box::new(Synth::with(None, 100, 50)))
+}
+
 static SYNTH: ContainerDescriptor = ContainerDescriptor {
     name: "synth",
     extensions: &["syn"],
@@ -138,23 +152,43 @@ static SYNTH: ContainerDescriptor = ContainerDescriptor {
     open: synth_open,
 };
 
+static SYNTH_SHORT: ContainerDescriptor = ContainerDescriptor {
+    name: "synth-short",
+    extensions: &[],
+    probe: |h| if h.starts_with(b"SHO") { 50 } else { 0 },
+    open: synth_open_short,
+};
+
+static SYNTH_UNKNOWN: ContainerDescriptor = ContainerDescriptor {
+    name: "synth-unknown",
+    extensions: &[],
+    probe: |h| if h.starts_with(b"UNK") { 50 } else { 0 },
+    open: synth_open_unknown_len,
+};
+
 fn synth_registry() -> Registry {
     let mut reg = Registry::new();
     reg.add_container(&SYNTH);
+    reg.add_container(&SYNTH_SHORT);
+    reg.add_container(&SYNTH_UNKNOWN);
     for c in default_registry().codecs() {
         reg.add_codec(c);
     }
     reg
 }
 
-fn synth_reader(opts: Options) -> Reader {
+fn synth_reader_with(magic: &'static [u8], opts: Options) -> Reader {
     Reader::open_with(
         &synth_registry(),
-        Box::new(SliceSource::new(b"SYNxxxxxxxx")),
+        Box::new(SliceSource::new(magic)),
         opts,
         None,
     )
     .unwrap()
+}
+
+fn synth_reader(opts: Options) -> Reader {
+    synth_reader_with(b"SYNxxxxxxxx", opts)
 }
 
 #[test]
@@ -191,6 +225,93 @@ fn cancel_is_checked_before_each_packet() {
     let mut r = synth_reader(opts);
     src.cancel();
     let mut buf = AudioBuffer::new();
+    assert_eq!(r.read(&mut buf), Err(Error::Cancelled));
+}
+
+#[test]
+fn read_leaves_no_stale_frames_at_end() {
+    let mut r = synth_reader(Options::default());
+    let mut buf = AudioBuffer::new();
+    let mut total = 0usize;
+    loop {
+        let more = r.read(&mut buf).unwrap();
+        // Consume before checking `more`: a stale buffer would be double counted.
+        total += buf.frames();
+        if !more {
+            break;
+        }
+    }
+    assert_eq!(buf.frames(), 0);
+    assert_eq!(total as u64, TOTAL - 150);
+    // Repeated reads after the end stay empty.
+    assert!(!r.read(&mut buf).unwrap());
+    assert_eq!(buf.frames(), 0);
+}
+
+#[test]
+fn frames_and_position_follow_the_trimmed_timeline() {
+    let mut r = synth_reader(Options::default());
+    assert_eq!(r.frames(), Some(TOTAL - 150));
+    assert_eq!(r.position(), 0);
+    let mut buf = AudioBuffer::new();
+    assert!(r.read(&mut buf).unwrap());
+    assert_eq!(r.position(), buf.frames() as u64);
+    r.seek(500).unwrap();
+    assert_eq!(r.position(), 500);
+    let mut n = 0u64;
+    while r.read(&mut buf).unwrap() {
+        n += buf.frames() as u64;
+        assert_eq!(r.position(), 500 + n);
+    }
+    assert_eq!(r.position(), r.frames().unwrap());
+}
+
+#[test]
+fn delay_plus_padding_beyond_frames_is_empty() {
+    let mut r = synth_reader_with(b"SHOxxxx", Options::default());
+    assert_eq!(r.frames(), Some(0));
+    let mut buf = AudioBuffer::new();
+    assert!(!r.read(&mut buf).unwrap());
+    assert_eq!(buf.frames(), 0);
+    assert_eq!(r.position(), 0);
+}
+
+#[test]
+fn unknown_length_still_trims_delay() {
+    let mut r = synth_reader_with(b"UNKxxxx", Options::default());
+    assert_eq!(r.frames(), None);
+    let got = drain_i16(&mut r, 1);
+    assert_eq!(got[0].len() as u64, TOTAL - 100);
+    assert_eq!(got[0][0], 100);
+    assert_eq!(r.frames(), None);
+    assert_eq!(r.position(), TOTAL - 100);
+}
+
+#[test]
+fn seek_past_end_clamps_position() {
+    let mut r = synth_reader(Options::default());
+    r.seek(10_000).unwrap();
+    assert_eq!(r.position(), TOTAL - 150);
+    let mut buf = AudioBuffer::new();
+    assert!(!r.read(&mut buf).unwrap());
+    assert_eq!(buf.frames(), 0);
+    // Seeking back works afterwards.
+    r.seek(0).unwrap();
+    assert_eq!(r.position(), 0);
+    assert!(r.read(&mut buf).unwrap());
+}
+
+#[test]
+fn cancel_mid_stream() {
+    let src = agulha_core::CancelSource::new();
+    let opts = Options {
+        cancel: src.token(),
+        ..Options::default()
+    };
+    let mut r = synth_reader(opts);
+    let mut buf = AudioBuffer::new();
+    assert!(r.read(&mut buf).unwrap());
+    src.cancel();
     assert_eq!(r.read(&mut buf), Err(Error::Cancelled));
 }
 
