@@ -26,7 +26,7 @@ impl Default for Limits {
             max_frames: 66_355_200_000,
             max_channels: 32,
             max_sample_rate: 768_000,
-            max_metadata_bytes: 16 << 20,
+            max_metadata_bytes: 64 << 20,
             max_depth: 16,
         }
     }
@@ -150,5 +150,10 @@ mod tests {
             Err(Error::Limit(LimitKind::Bytes))
         );
         assert_eq!(l.check_bytes(64u64 << 30), Ok(()));
+    }
+
+    #[test]
+    fn default_metadata_limit_is_64_mib() {
+        assert_eq!(Limits::default().max_metadata_bytes, 64 << 20);
     }
 }

@@ -1263,3 +1263,96 @@ fn bisection_ignores_fake_headers_inside_frame_bodies() {
     assert_eq!((got.frame, got.preroll), (2900 * 4096, 7));
     assert!(bytes.load(Ordering::SeqCst) < len / 4);
 }
+
+// ------------------------------------ legacy variable block size, totals, minimum size
+
+/// Like `variable_stream`, but in the pre-2007 layout: the blocking-strategy bit says
+/// "fixed" while the coded number is a sample number (RFC 9639 appendix B.1: such
+/// streams are recognised by `min_block != max_block` in STREAMINFO).
+fn legacy_variable_stream(rounds: usize) -> (Vec<u8>, Vec<(u64, u32)>) {
+    let mut frames = Vec::new();
+    let mut spans = Vec::new();
+    let mut pos = 0u64;
+    for r in 0..rounds {
+        for (i, &s) in VAR_SIZES.iter().enumerate() {
+            frames.push(syn_frame(
+                false,
+                pos,
+                s,
+                &payload((r * 9 + i) as u64, 120 + i * 11),
+            ));
+            spans.push((pos, s));
+            pos += u64::from(s);
+        }
+    }
+    (syn_stream(100, 4096, 0, pos, &frames), spans)
+}
+
+#[test]
+fn legacy_variable_block_size_stream() {
+    let (file, spans) = legacy_variable_stream(3);
+    let mut d = open(file.clone(), &strict());
+    let (pk, r, ev) = read_all(&mut d);
+    assert_eq!(r, Ok(()));
+    assert!(ev.is_empty());
+    assert_eq!(pk.len(), spans.len());
+    for (p, (pts, size)) in pk.iter().zip(&spans) {
+        assert_eq!((p.pts, p.frames), (*pts, *size));
+    }
+    check_seeks(&file, "legacy variable");
+    check_seeks(&with_seektable(&file, 4, 0), "legacy variable + table");
+}
+
+#[test]
+fn fixed_stream_whose_streaminfo_minimum_counts_the_short_tail_is_still_fixed() {
+    let mut frames = fixed_frames(6, 1000);
+    frames.truncate(7);
+    let file = syn_stream(1000, 4096, 0, 6 * 4096 + 1000, &frames);
+    let pk = clean(&file);
+    assert_eq!(pk.len(), 7);
+    assert_eq!((pk[6].pts, pk[6].frames), (6 * 4096, 1000));
+    check_seeks(&file, "fixed, min != max");
+}
+
+#[test]
+fn more_samples_than_declared_is_invalid_in_strict() {
+    let file = syn_stream(4096, 4096, 0, 2 * 4096, &fixed_frames(3, 0));
+    let mut d = open(file, &strict());
+    let (pk, r, _) = read_all(&mut d);
+    assert_eq!(pk.len(), 2);
+    assert_eq!(invalid(&r).0, "flac total samples");
+}
+
+#[test]
+fn more_samples_than_declared_is_clamped_in_resilient() {
+    let file = syn_stream(4096, 4096, 0, 2 * 4096, &fixed_frames(4, 0));
+    let mut d = open(file, &resilient());
+    let (pk, r, ev) = read_all(&mut d);
+    assert_eq!(r, Ok(()));
+    assert_eq!(pk.len(), 4, "no audio is dropped");
+    assert_eq!(
+        ev,
+        [Event::Clamped {
+            what: "flac total samples",
+            declared: 2 * 4096,
+            actual: 3 * 4096,
+        }]
+    );
+}
+
+#[test]
+fn undersized_non_final_blocks_are_invalid_in_strict_only() {
+    let frames: Vec<Vec<u8>> = (0..5)
+        .map(|i| syn_frame(false, i, 8, &payload(i, 40)))
+        .collect();
+    let file = syn_stream(8, 8, 0, 40, &frames);
+    let mut d = open(file.clone(), &strict());
+    let (_, r, _) = read_all(&mut d);
+    assert_eq!(invalid(&r).0, "flac block size");
+    let mut d = open(file, &resilient());
+    let (pk, r, ev) = read_all(&mut d);
+    assert_eq!((r, pk.len(), ev.len()), (Ok(()), 5, 0));
+    // A short final frame stays legal.
+    let short = syn_stream(4096, 4096, 0, 4096 + 5, &fixed_frames(1, 5));
+    assert_eq!(clean(&short).len(), 2);
+}

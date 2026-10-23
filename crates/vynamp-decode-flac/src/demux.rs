@@ -11,7 +11,7 @@
 //! missing samples between valid headers the same way, and reports each case
 //! with `Event::CorruptFrame`.
 
-use crate::frame::{FrameHeader, MAX_HEADER, parse_frame_header};
+use crate::frame::{FrameHeader, MAX_HEADER, parse_frame_header_with};
 use crate::metadata::read_metadata;
 use crate::{RawBlock, SeekPoint, StreamInfo};
 use vynamp_decode_core::{
@@ -67,6 +67,10 @@ pub struct FlacDemuxer {
     audio_end: u64,
     /// Blocking strategy of the stream, learned from the first confirmed frame.
     blocking: Option<bool>,
+    /// Pre-2007 variable block size layout: "fixed" headers carry sample numbers.
+    legacy_vbr: bool,
+    /// The `Clamped` event for samples beyond STREAMINFO's total was already queued.
+    clamped: bool,
     /// Where Resilient mode started skipping unparseable bytes.
     skipped: Option<u64>,
     events: Vec<Event>,
@@ -163,7 +167,7 @@ impl FlacDemuxer {
         };
         let rest = &rest[..rest.len().min(MAX_HEADER)];
         let blocking = self.blocking;
-        Ok(parse_frame_header(rest, &self.info)
+        Ok(parse_frame_header_with(rest, &self.info, self.legacy_vbr)
             .ok()
             .filter(|h| blocking.is_none_or(|b| b == h.blocking_variable)))
     }
@@ -518,6 +522,56 @@ impl FlacDemuxer {
     }
 }
 
+impl FlacDemuxer {
+    /// Recognises the pre-2007 variable block size layout.
+    ///
+    /// RFC 9639 appendix B.1: before July 2007 variable block size streams were not
+    /// flagged in the frame header, and decoders told them apart by comparing the
+    /// minimum and maximum block size of STREAMINFO. The coded number of such a frame
+    /// is the sample number although the header says "fixed". Because a fixed stream
+    /// can also have a smaller minimum (its short last frame), the layout is only
+    /// accepted when the second frame's number equals the first frame's block size
+    /// (a frame number would be 1). Streams with equal minimum and maximum are never
+    /// examined.
+    fn detect_legacy_vbr(&mut self) -> Result<()> {
+        if self.info.min_block == self.info.max_block {
+            return Ok(());
+        }
+        let first = self.first_frame;
+        self.reposition(first)?;
+        let found = (|| -> Result<bool> {
+            let Some(h0) = self.header_at(0)? else {
+                return Ok(false);
+            };
+            if h0.blocking_variable || h0.first_sample != 0 {
+                return Ok(false);
+            }
+            let loc = self.locate(&h0)?;
+            if !loc.crc_ok {
+                return Ok(false);
+            }
+            self.ensure(loc.end + MAX_HEADER)?;
+            let Some(rest) = self.buf.get(loc.end..) else {
+                return Ok(false);
+            };
+            let rest = &rest[..rest.len().min(MAX_HEADER)];
+            Ok(
+                parse_frame_header_with(rest, &self.info, true).is_ok_and(|h1| {
+                    !h1.blocking_variable && h1.first_sample == u64::from(h0.block_size)
+                }),
+            )
+        })();
+        self.legacy_vbr = match found {
+            Ok(b) => b,
+            Err(e @ Error::Cancelled) => return Err(e),
+            Err(_) => false,
+        };
+        self.reposition(first)?;
+        self.blocking = None;
+        Ok(())
+    }
+}
+
 /// End of a frame found by [`FlacDemuxer::locate`].
 struct Located {
     /// Buffer index one past the frame.
@@ -606,7 +660,7 @@ pub fn open_flac(mut src: Box<dyn Source>, opts: &Options) -> Result<FlacDemuxer
     };
     let audio_end = find_trailer(src.as_mut(), first_frame)?;
     src.seek(first_frame)?;
-    Ok(FlacDemuxer {
+    let mut d = FlacDemuxer {
         src,
         opts: opts.clone(),
         tracks: vec![track],
@@ -624,9 +678,13 @@ pub fn open_flac(mut src: Box<dyn Source>, opts: &Options) -> Result<FlacDemuxer
         done: false,
         audio_end,
         blocking: None,
+        legacy_vbr: false,
+        clamped: false,
         skipped: None,
         events: Vec::new(),
-    })
+    };
+    d.detect_legacy_vbr()?;
+    Ok(d)
 }
 
 impl Demuxer for FlacDemuxer {
@@ -713,7 +771,31 @@ impl Demuxer for FlacDemuxer {
                 self.done = true;
                 return Ok(false);
             }
+            let total = self.info.total_samples;
+            if total != 0 && end_pts > total {
+                if self.strict() {
+                    return Err(Error::Invalid {
+                        what: "flac total samples",
+                        offset,
+                    });
+                }
+                if !self.clamped {
+                    self.clamped = true;
+                    self.event(Event::Clamped {
+                        what: "flac total samples",
+                        declared: total,
+                        actual: end_pts,
+                    });
+                }
+            }
             let loc = self.locate(&h)?;
+            // RFC 9639 section 4.1: only the last block may be shorter than 16 samples.
+            if h.block_size < 16 && self.strict() && !(self.eof && loc.end == self.buf.len()) {
+                return Err(Error::Invalid {
+                    what: "flac block size",
+                    offset,
+                });
+            }
             if let Some(from) = skipped
                 && !self.strict()
             {

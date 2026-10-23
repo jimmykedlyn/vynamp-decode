@@ -45,6 +45,17 @@ pub struct FrameHeader {
 /// block size). Error offsets are relative to `bytes`; a sync search treats any
 /// error as "no header here". `bytes` may be longer than the header.
 pub(crate) fn parse_frame_header(bytes: &[u8], info: &StreamInfo) -> Result<FrameHeader> {
+    parse_frame_header_with(bytes, info, false)
+}
+
+/// Like [`parse_frame_header`]. With `legacy_vbr` a header that says "fixed" carries a
+/// sample number, as written by encoders from before the blocking-strategy bit existed
+/// (RFC 9639 appendix B.1).
+pub(crate) fn parse_frame_header_with(
+    bytes: &[u8],
+    info: &StreamInfo,
+    legacy_vbr: bool,
+) -> Result<FrameHeader> {
     let bad = |what: &'static str, offset: usize| Error::Invalid {
         what,
         offset: offset as u64,
@@ -147,8 +158,12 @@ pub(crate) fn parse_frame_header(bytes: &[u8], info: &StreamInfo) -> Result<Fram
         if number >> 31 != 0 {
             return Err(bad("flac coded number", 4));
         }
-        // Fixed-size streams: every frame but the last holds `max_block` samples.
-        number * u64::from(info.max_block)
+        if legacy_vbr {
+            number
+        } else {
+            // Fixed-size streams: every frame but the last holds `max_block` samples.
+            number * u64::from(info.max_block)
+        }
     };
     Ok(FrameHeader {
         blocking_variable,
