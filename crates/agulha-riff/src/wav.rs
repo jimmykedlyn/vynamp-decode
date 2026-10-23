@@ -12,7 +12,8 @@ const UNKNOWN: u32 = u32::MAX;
 pub(crate) fn parse(src: &mut dyn Source, magic: [u8; 4], opts: &Options) -> Result<Layout> {
     let src_len = src.len();
     let mut r = ByteReader::new(src);
-    r.skip(8)?;
+    r.skip(4)?;
+    let riff_size32 = r.u32_le()?;
     if &r.fourcc()? != b"WAVE" {
         return Err(Error::Invalid {
             what: "form type",
@@ -21,8 +22,10 @@ pub(crate) fn parse(src: &mut dyn Source, magic: [u8; 4], opts: &Options) -> Res
     }
     let big = &magic != b"RIFF";
     let mut ds64_data: Option<u64> = None;
+    let mut ds64_riff: Option<u64> = None;
     let mut fmt: Option<Fmt> = None;
     loop {
+        opts.cancel.check()?;
         let start = r.position();
         if src_len.is_some_and(|l| start >= l) {
             return Err(Error::Invalid {
@@ -42,7 +45,7 @@ pub(crate) fn parse(src: &mut dyn Source, magic: [u8; 4], opts: &Options) -> Res
                         offset: start,
                     });
                 }
-                let _riff_size = r.u64_le()?;
+                ds64_riff = Some(r.u64_le()?);
                 ds64_data = Some(r.u64_le()?);
             }
             b"fmt " => {
@@ -63,7 +66,15 @@ pub(crate) fn parse(src: &mut dyn Source, magic: [u8; 4], opts: &Options) -> Res
                         offset: start,
                     });
                 };
-                let data_len = if size32 != UNKNOWN {
+                // A zero size followed by more bytes is a streamed file whose
+                // size was never patched; an empty file ends at the header.
+                let zero_with_data = size32 == 0
+                    && !big
+                    && match src_len {
+                        Some(l) => body < l,
+                        None => r.u8().is_ok(),
+                    };
+                let data_len = if size32 != UNKNOWN && !zero_with_data {
                     Some(size)
                 } else if big {
                     Some(ds64_data.ok_or(Error::Invalid {
@@ -78,10 +89,20 @@ pub(crate) fn parse(src: &mut dyn Source, magic: [u8; 4], opts: &Options) -> Res
                 } else {
                     None
                 };
+                let declared_end = if big {
+                    ds64_riff.and_then(|n| n.checked_add(8))
+                } else {
+                    Some(u64::from(riff_size32) + 8)
+                };
+                // 0 and all-ones mean "not patched"; the end must lie after the data start.
+                let container_end = declared_end
+                    .filter(|_| riff_size32 != 0 && riff_size32 != UNKNOWN || big)
+                    .filter(|&e| e > body);
                 return Ok(Layout {
                     fmt,
                     data_start: body,
                     data_len,
+                    container_end,
                 });
             }
             _ => {}

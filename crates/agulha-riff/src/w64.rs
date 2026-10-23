@@ -2,7 +2,7 @@
 
 use crate::Layout;
 use crate::fmt::{FMT_READ, Fmt, parse_fmt};
-use agulha_core::{ByteReader, Error, LimitKind, Options, Result, Source};
+use agulha_core::{ByteReader, Error, LimitKind, Mode, Options, Result, Source};
 
 const fn guid(d1: u32, d2: u16, d3: u16, d4: [u8; 8]) -> [u8; 16] {
     let a = d1.to_le_bytes();
@@ -44,7 +44,7 @@ pub(crate) fn parse(src: &mut dyn Source, opts: &Options) -> Result<Layout> {
             offset: 0,
         });
     }
-    r.skip(8)?;
+    let file_size = r.u64_le()?;
     if read_guid(&mut r)? != GUID_WAVE {
         return Err(Error::Invalid {
             what: "form type",
@@ -53,6 +53,7 @@ pub(crate) fn parse(src: &mut dyn Source, opts: &Options) -> Result<Layout> {
     }
     let mut fmt: Option<Fmt> = None;
     loop {
+        opts.cancel.check()?;
         let start = r.position();
         if src_len.is_some_and(|l| start >= l) {
             return Err(Error::Invalid {
@@ -85,10 +86,29 @@ pub(crate) fn parse(src: &mut dyn Source, opts: &Options) -> Result<Layout> {
                     offset: start,
                 });
             };
+            // An empty payload followed by more bytes is an unpatched streamed file.
+            let more = payload == 0
+                && match src_len {
+                    Some(l) => body < l,
+                    None => r.u8().is_ok(),
+                };
+            let data_len = if more {
+                if opts.mode == Mode::Strict {
+                    return Err(Error::Invalid {
+                        what: "unknown data size",
+                        offset: start,
+                    });
+                }
+                None
+            } else {
+                Some(payload)
+            };
+            let container_end = Some(file_size).filter(|&e| e > body && e != u64::MAX);
             return Ok(Layout {
                 fmt,
                 data_start: body,
-                data_len: Some(payload),
+                data_len,
+                container_end,
             });
         }
         let next = start

@@ -2,6 +2,19 @@
 //!
 //! Exposes a single PCM track (id 0) split into packets of up to
 //! [`PACKET_FRAMES`] frames.
+//!
+//! Notes on malformed or streamed input:
+//!
+//! - A `data` chunk whose size is `0xFFFFFFFF` (plain RIFF), or `0` with more
+//!   bytes after its header (RIFF and Wave64), has an unknown size. In
+//!   `Mode::Strict` opening fails with `Invalid { what: "unknown data size" }`;
+//!   in `Mode::Resilient` the track has `frames == None` and samples are read up
+//!   to the container size declared in the file header when that is usable
+//!   (so trailing `LIST`/`id3 ` chunks are not decoded as audio), else to the end
+//!   of the source. A `data` chunk of size 0 that ends the file is a valid empty
+//!   stream (`frames == Some(0)`).
+//! - If the data size is not a multiple of the frame size, the trailing partial
+//!   frame is dropped (common in real files).
 #![warn(missing_docs)]
 
 mod fmt;
@@ -23,6 +36,8 @@ pub(crate) struct Layout {
     pub data_start: u64,
     /// Declared length of the data chunk in bytes, `None` if unknown.
     pub data_len: Option<u64>,
+    /// Absolute end of the container as declared by its header, if usable.
+    pub container_end: Option<u64>,
 }
 
 /// Detects a WAV-family signature in `header` (the first bytes of the file).
@@ -94,13 +109,20 @@ pub fn open_riff(mut src: Box<dyn Source>, opts: &Options) -> Result<RiffDemuxer
         fmt,
         data_start,
         data_len,
+        container_end,
     } = layout;
     let block = u64::from(fmt.block_align);
     let declared = data_len.map(|d| d / block);
     if let Some(f) = declared {
         opts.limits.check_frames(f)?;
     }
-    let total = declared.or_else(|| src.len().map(|l| l.saturating_sub(data_start) / block));
+    let total = declared.or_else(|| {
+        let end = match (src.len(), container_end) {
+            (Some(l), Some(c)) => Some(l.min(c)),
+            (l, c) => l.or(c),
+        };
+        end.map(|e| e.saturating_sub(data_start) / block)
+    });
     if let Some(f) = total {
         opts.limits.check_frames(f)?;
     }

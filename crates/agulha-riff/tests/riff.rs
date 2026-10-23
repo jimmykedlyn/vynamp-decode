@@ -394,3 +394,187 @@ fn packet_buffer_is_reused() {
     assert!(d.next_packet(&mut p).unwrap());
     assert_eq!(p.data.as_ptr(), ptr);
 }
+
+fn resilient() -> Options {
+    Options {
+        mode: Mode::Resilient,
+        ..Options::default()
+    }
+}
+
+fn s16() -> PcmSpec {
+    spec(PcmEncoding::Signed, 16)
+}
+
+fn invalid_what(r: agulha_core::Result<agulha_riff::RiffDemuxer>) -> &'static str {
+    match r {
+        Err(Error::Invalid { what, .. }) => what,
+        other => panic!("expected Invalid, got {:?}", other.map(|_| ())),
+    }
+}
+
+#[test]
+fn riff_zero_data_size() {
+    let s = s16();
+    // Genuinely empty: the file ends right after the data header.
+    let empty = wav(s, RATE, 2, &[], WavVariant::Riff);
+    let mut d = open(empty, &Options::default()).unwrap();
+    assert_eq!(d.tracks()[0].frames, Some(0));
+    assert!(read_all(&mut d).unwrap().is_empty());
+
+    // Zero size with data following: unknown size.
+    let data = samples(s, 2, 300);
+    let mut file = wav(s, RATE, 2, &data, WavVariant::Riff);
+    patch(&mut file, 40, &0u32.to_le_bytes());
+    assert_eq!(
+        invalid_what(open(file.clone(), &Options::default())),
+        "unknown data size"
+    );
+    let mut d = open(file.clone(), &resilient()).unwrap();
+    assert_eq!(d.tracks()[0].frames, None);
+    assert!(read_all(&mut d).unwrap() == data);
+
+    // Trailing chunks beyond the RIFF size are not audio.
+    let mut with_list = file;
+    with_list.extend(b"LIST");
+    with_list.extend(8u32.to_le_bytes());
+    with_list.extend([7u8; 8]);
+    let mut d = open(with_list, &resilient()).unwrap();
+    assert!(read_all(&mut d).unwrap() == data);
+}
+
+#[test]
+fn wave64_zero_data_size() {
+    let s = s16();
+    let empty = wav(s, RATE, 1, &[], WavVariant::Wave64);
+    let mut d = open(empty, &Options::default()).unwrap();
+    assert_eq!(d.tracks()[0].frames, Some(0));
+    assert!(read_all(&mut d).unwrap().is_empty());
+
+    let data = samples(s, 1, 400);
+    let mut file = wav(s, RATE, 1, &data, WavVariant::Wave64);
+    patch(&mut file, 96, &24u64.to_le_bytes());
+    assert_eq!(
+        invalid_what(open(file.clone(), &Options::default())),
+        "unknown data size"
+    );
+    let mut d = open(file.clone(), &resilient()).unwrap();
+    assert_eq!(d.tracks()[0].frames, None);
+    assert!(read_all(&mut d).unwrap() == data);
+
+    let mut with_tail = file;
+    with_tail.extend([9u8; 32]);
+    let mut d = open(with_tail, &resilient()).unwrap();
+    assert!(read_all(&mut d).unwrap() == data);
+}
+
+#[test]
+fn rate_and_channels_zero() {
+    let good = wav(s16(), RATE, 2, &[0; 16], WavVariant::Riff);
+    let mut f = good.clone();
+    patch(&mut f, 24, &0u32.to_le_bytes());
+    assert_eq!(invalid_what(open(f, &Options::default())), "sample rate");
+    let mut f = good;
+    patch(&mut f, 22, &0u16.to_le_bytes());
+    assert_eq!(invalid_what(open(f, &Options::default())), "channels");
+}
+
+#[test]
+fn huge_chunk_size_is_eof() {
+    let file = wav(s16(), RATE, 1, &[0; 8], WavVariant::Riff);
+    let mut out = file[..36].to_vec();
+    out.extend(b"junk");
+    out.extend(0xFFFF_FFF0u32.to_le_bytes());
+    out.extend([0; 8]);
+    assert_eq!(
+        invalid_what(open(out, &Options::default())),
+        "unexpected eof"
+    );
+}
+
+#[test]
+fn zero_size_unknown_chunk() {
+    let data = samples(s16(), 1, 50);
+    let file = wav(s16(), RATE, 1, &data, WavVariant::Riff);
+    let mut out = file[..36].to_vec();
+    out.extend(b"junk");
+    out.extend(0u32.to_le_bytes());
+    out.extend(&file[36..]);
+    let mut d = open(out, &Options::default()).unwrap();
+    assert!(read_all(&mut d).unwrap() == data);
+}
+
+#[test]
+fn truncated_headers() {
+    let file = wav(s16(), RATE, 1, &[0; 8], WavVariant::Riff);
+    assert!(matches!(
+        open(file[..10].to_vec(), &Options::default()),
+        Err(Error::Invalid { .. })
+    ));
+    assert!(matches!(
+        open(file[..30].to_vec(), &Options::default()),
+        Err(Error::Invalid { .. })
+    ));
+}
+
+#[test]
+fn rf64_without_ds64() {
+    let file = wav(s16(), RATE, 1, &[0; 8], WavVariant::Rf64);
+    // 12-byte header, then ds64 (8 + 28 bytes).
+    let mut out = file[..12].to_vec();
+    out.extend(&file[48..]);
+    assert_eq!(invalid_what(open(out, &Options::default())), "missing ds64");
+}
+
+#[test]
+fn partial_trailing_frame_is_dropped() {
+    let data = samples(s16(), 2, 11);
+    let file = wav(s16(), RATE, 2, &data[..43], WavVariant::Riff);
+    let mut d = open(file, &Options::default()).unwrap();
+    assert_eq!(d.tracks()[0].frames, Some(10));
+    assert!(read_all(&mut d).unwrap() == data[..40]);
+}
+
+#[test]
+fn wave64_data_before_fmt() {
+    let file = wav(s16(), RATE, 1, &[0; 16], WavVariant::Wave64);
+    let mut out = file[..40].to_vec();
+    out.extend(&file[80..]);
+    out.extend(&file[40..80]);
+    assert_eq!(
+        invalid_what(open(out, &Options::default())),
+        "data before fmt"
+    );
+}
+
+#[test]
+fn byte_flip_and_truncation_smoke() {
+    let s = s16();
+    let data = samples(s, 2, 64);
+    for variant in [
+        WavVariant::Riff,
+        WavVariant::Extensible,
+        WavVariant::Rf64,
+        WavVariant::Wave64,
+        WavVariant::RiffStreaming,
+    ] {
+        let file = wav(s, RATE, 2, &data, variant);
+        let mut cases: Vec<Vec<u8>> = Vec::new();
+        for i in 0..128.min(file.len()) {
+            let mut f = file.clone();
+            f[i] ^= 0xFF;
+            cases.push(f);
+        }
+        for n in 0..=128.min(file.len()) {
+            cases.push(file[..n].to_vec());
+        }
+        for case in cases {
+            for opts in [Options::default(), resilient()] {
+                if let Ok(mut d) = open(case.clone(), &opts) {
+                    let mut p = Packet::default();
+                    while let Ok(true) = d.next_packet(&mut p) {}
+                }
+            }
+        }
+    }
+}

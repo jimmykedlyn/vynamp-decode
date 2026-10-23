@@ -51,19 +51,24 @@ fn subformat(tag: u16) -> Guid {
     )
 }
 
+/// Container width in bits: `spec.bits` rounded up to whole bytes (at least 8).
+fn container_bits(spec: PcmSpec) -> u16 {
+    u16::from(spec.bits).div_ceil(8).max(1) * 8
+}
+
 fn fmt_body(spec: PcmSpec, rate: u32, channels: u16, extensible: bool) -> Vec<u8> {
     let tag: u16 = if spec.encoding == PcmEncoding::Float {
         3
     } else {
         1
     };
-    let bits = u16::from(spec.bits);
-    let block_align = channels * (bits / 8);
+    let bits = container_bits(spec);
+    let block_align = channels.wrapping_mul(bits / 8);
     let mut v = Vec::new();
     v.extend((if extensible { 0xFFFEu16 } else { tag }).to_le_bytes());
     v.extend(channels.to_le_bytes());
     v.extend(rate.to_le_bytes());
-    v.extend((rate * u32::from(block_align)).to_le_bytes());
+    v.extend(rate.wrapping_mul(u32::from(block_align)).to_le_bytes());
     v.extend(block_align.to_le_bytes());
     v.extend(bits.to_le_bytes());
     if extensible {
@@ -128,7 +133,7 @@ pub fn wav(
     out.extend(0u32.to_le_bytes());
     out.extend(b"WAVE");
     if big {
-        let frame_bytes = u64::from(channels) * u64::from(spec.bits / 8);
+        let frame_bytes = (u64::from(channels) * u64::from(container_bits(spec) / 8)).max(1);
         let mut ds = Vec::new();
         ds.extend(0u64.to_le_bytes()); // RIFF size, patched below
         ds.extend((data.len() as u64).to_le_bytes());
