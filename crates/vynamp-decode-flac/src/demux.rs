@@ -35,6 +35,11 @@ const MAX_EVENTS: usize = 4096;
 const ID3V1_LEN: usize = 128;
 
 /// Demuxer for native FLAC streams.
+///
+/// `Packet::data` holds one frame from its sync code through its CRC-16
+/// footer. It may carry trailing bytes after the footer (for example a zero
+/// fill that the CRC-16 cannot tell apart from the frame), so a decoder must
+/// read the footer at the position it parsed and ignore anything after it.
 pub struct FlacDemuxer {
     src: Box<dyn Source>,
     opts: Options,
@@ -58,6 +63,12 @@ pub struct FlacDemuxer {
     last_end: u64,
     /// No more packets (end of data or trailer reached).
     done: bool,
+    /// Absolute position where an ID3v1/APEv2 trailer begins (`u64::MAX` = none).
+    audio_end: u64,
+    /// Blocking strategy of the stream, learned from the first confirmed frame.
+    blocking: Option<bool>,
+    /// Where Resilient mode started skipping unparseable bytes.
+    skipped: Option<u64>,
     events: Vec<Event>,
 }
 
@@ -119,8 +130,16 @@ impl FlacDemuxer {
     /// Reads until `buf` holds at least `upto` bytes or the source ends.
     fn ensure(&mut self, upto: usize) -> Result<()> {
         while self.buf.len() < upto && !self.eof {
+            let room = self
+                .audio_end
+                .saturating_sub(self.buf_off + self.buf.len() as u64);
+            if room == 0 {
+                self.eof = true;
+                break;
+            }
             let old = self.buf.len();
-            self.buf.resize(old + self.chunk, 0);
+            let want = self.chunk.min(usize::try_from(room).unwrap_or(usize::MAX));
+            self.buf.resize(old + want, 0);
             match self.src.read(&mut self.buf[old..]) {
                 Ok(0) => {
                     self.buf.truncate(old);
@@ -143,7 +162,10 @@ impl FlacDemuxer {
             return Ok(None);
         };
         let rest = &rest[..rest.len().min(MAX_HEADER)];
-        Ok(parse_frame_header(rest, &self.info).ok())
+        let blocking = self.blocking;
+        Ok(parse_frame_header(rest, &self.info)
+            .ok()
+            .filter(|h| blocking.is_none_or(|b| b == h.blocking_variable)))
     }
 
     /// Moves `head` to the next 0xFF byte at or after it; `false` at the end of data.
@@ -165,12 +187,23 @@ impl FlacDemuxer {
         }
     }
 
-    /// Whether exactly an ID3v1 tag is left in the source.
-    fn at_id3v1(&mut self) -> Result<bool> {
-        self.ensure(self.head + ID3V1_LEN + 1)?;
-        Ok(self.eof
-            && self.buf.len() - self.head == ID3V1_LEN
-            && self.buf[self.head..].starts_with(b"TAG"))
+    /// Records that bytes are being skipped and steps past the one at `head`.
+    fn skip_one(&mut self) -> Result<bool> {
+        if self.skipped.is_none() {
+            self.skipped = Some(self.abs(self.head));
+        }
+        self.head += 1;
+        self.advance_to_ff()
+    }
+
+    /// A header with a block size below the STREAMINFO minimum is only valid in
+    /// the last frame of the stream.
+    fn plausible(&mut self, h: &FrameHeader) -> Result<bool> {
+        if h.block_size >= u32::from(self.info.min_block) {
+            return Ok(true);
+        }
+        let loc = self.locate(h)?;
+        Ok(loc.crc_ok && self.eof && loc.end == self.buf.len())
     }
 
     /// Finds the frame header at `head`. Garbage is an error in Strict mode and
@@ -185,11 +218,13 @@ impl FlacDemuxer {
             if self.head >= self.buf.len() {
                 return Ok(None);
             }
-            if let Some(h) = self.header_at(self.head)? {
+            if let Some(h) = self.header_at(self.head)?
+                && self.plausible(&h)?
+            {
                 return Ok(Some(h));
             }
             let total = self.info.total_samples;
-            if (total != 0 && self.next_pts >= total) || self.at_id3v1()? {
+            if total != 0 && self.next_pts >= total {
                 // Everything declared has been delivered: what follows is a trailer.
                 self.done = true;
                 return Ok(None);
@@ -200,8 +235,7 @@ impl FlacDemuxer {
                     offset: self.abs(self.head),
                 });
             }
-            self.head += 1;
-            if !self.advance_to_ff()? {
+            if !self.skip_one()? {
                 return Ok(None);
             }
         }
@@ -273,19 +307,13 @@ impl FlacDemuxer {
             }
             j += 1;
         }
-        // No further header: the frame runs to the end of the data (before an ID3v1 tag).
+        // No further header: the frame runs to the end of the data (before any trailer).
         let len = self.buf.len();
         if self.crc_ok(start, len) {
             return Ok(Located {
                 end: len,
                 crc_ok: true,
             });
-        }
-        if len - start > ID3V1_LEN && self.buf[len - ID3V1_LEN..].starts_with(b"TAG") {
-            let end = len - ID3V1_LEN;
-            if self.crc_ok(start, end) {
-                return Ok(Located { end, crc_ok: true });
-            }
         }
         Ok(Located {
             end: first.unwrap_or(len),
@@ -301,7 +329,19 @@ impl FlacDemuxer {
     /// End of data: a stream that stops before its declared length is an error in Strict mode.
     fn finish(&mut self) -> Result<bool> {
         let total = self.info.total_samples;
-        if total != 0 && self.next_pts < total {
+        let skipped = self.skipped.take();
+        if total == 0 || self.next_pts >= total {
+            if let Some(offset) = skipped
+                && !self.strict()
+            {
+                let pts = self.next_pts;
+                self.event(Event::CorruptFrame {
+                    pts,
+                    offset,
+                    frames: 0,
+                });
+            }
+        } else {
             let offset = self.abs(self.head);
             if self.strict() {
                 return Err(Error::Invalid {
@@ -352,7 +392,12 @@ impl FlacDemuxer {
                 return Ok(None);
             }
             if let Some(h) = self.header_at(self.head)? {
-                return Ok(Some((self.abs(self.head), h)));
+                // Only a header that starts a CRC-16 valid frame counts.
+                let loc = self.locate(&h)?;
+                if loc.crc_ok && self.plausible(&h)? {
+                    self.blocking.get_or_insert(h.blocking_variable);
+                    return Ok(Some((self.abs(self.head), h)));
+                }
             }
             self.head += 1;
             if !self.advance_to_ff()? {
@@ -463,6 +508,9 @@ impl FlacDemuxer {
                         offset: at,
                     });
                 }
+                if loc.crc_ok {
+                    self.blocking.get_or_insert(h.blocking_variable);
+                }
                 self.consume_to(loc.end);
                 self.next_pts = end_pts;
             }
@@ -476,6 +524,48 @@ struct Located {
     end: usize,
     /// The frame passes its CRC-16.
     crc_ok: bool,
+}
+
+/// Absolute position where an APEv2 and/or ID3v1 trailer starts (`u64::MAX` = none).
+fn find_trailer(src: &mut dyn Source, first_frame: u64) -> Result<u64> {
+    let Some(len) = src.len() else {
+        return Ok(u64::MAX);
+    };
+    let read_at = |src: &mut dyn Source, pos: u64, n: usize| -> Result<Option<Vec<u8>>> {
+        if pos < first_frame || pos + n as u64 > len {
+            return Ok(None);
+        }
+        src.seek(pos)?;
+        let mut v = vec![0u8; n];
+        let mut got = 0;
+        while got < n {
+            match src.read(&mut v[got..])? {
+                0 => return Ok(None),
+                k => got += k,
+            }
+        }
+        Ok(Some(v))
+    };
+    let mut end = len;
+    if len >= ID3V1_LEN as u64
+        && let Some(tag) = read_at(src, len - ID3V1_LEN as u64, 3)?
+        && &tag[..] == b"TAG"
+    {
+        end = len - ID3V1_LEN as u64;
+    }
+    if end >= 32
+        && let Some(f) = read_at(src, end - 32, 32)?
+        && f.starts_with(b"APETAGEX")
+    {
+        let le = |i: usize| u32::from_le_bytes([f[i], f[i + 1], f[i + 2], f[i + 3]]);
+        let (version, size, flags) = (le(8), u64::from(le(12)), le(20));
+        // The size covers the items and the footer but not an optional header.
+        let total = size + if flags & 0x8000_0000 != 0 { 32 } else { 0 };
+        if (version == 1000 || version == 2000) && size >= 32 && total <= end - first_frame {
+            end -= total;
+        }
+    }
+    Ok(if end < len { end } else { u64::MAX })
 }
 
 /// Opens a FLAC stream, parsing its metadata blocks.
@@ -514,6 +604,7 @@ pub fn open_flac(mut src: Box<dyn Source>, opts: &Options) -> Result<FlacDemuxer
         gapless: GaplessKind::Exact,
         codec_private,
     };
+    let audio_end = find_trailer(src.as_mut(), first_frame)?;
     src.seek(first_frame)?;
     Ok(FlacDemuxer {
         src,
@@ -531,6 +622,9 @@ pub fn open_flac(mut src: Box<dyn Source>, opts: &Options) -> Result<FlacDemuxer
         next_pts: 0,
         last_end: first_frame,
         done: false,
+        audio_end,
+        blocking: None,
+        skipped: None,
         events: Vec::new(),
     })
 }
@@ -551,6 +645,7 @@ impl Demuxer for FlacDemuxer {
             };
             let start = self.head;
             let offset = self.abs(start);
+            let skipped = self.skipped.take();
             if h.first_sample != self.next_pts {
                 if self.strict() {
                     return Err(Error::Invalid {
@@ -558,21 +653,35 @@ impl Demuxer for FlacDemuxer {
                         offset,
                     });
                 }
+                // Only a frame that passes its CRC-16 can justify a gap or an overlap.
+                let loc = self.locate(&h)?;
+                if !loc.crc_ok {
+                    self.skipped = skipped;
+                    self.skip_one()?;
+                    continue;
+                }
+                self.blocking.get_or_insert(h.blocking_variable);
                 if h.first_sample > self.next_pts {
                     // Samples are missing before this frame: fill them with silence.
                     let gap = h.first_sample - self.next_pts;
                     let total = self.info.total_samples;
-                    let mut room = self.opts.limits.max_frames;
+                    let mut room = self.opts.limits.max_frames.saturating_sub(self.next_pts);
                     if total != 0 {
                         room = room.min(total.saturating_sub(self.next_pts));
                     }
                     let fill = gap.min(room);
+                    let (pts, at) = (self.next_pts, self.last_end);
                     if fill == 0 {
+                        // Nothing more may be filled: report the loss and jump the timeline.
+                        self.event(Event::CorruptFrame {
+                            pts,
+                            offset: at,
+                            frames: u32::try_from(gap).unwrap_or(u32::MAX),
+                        });
                         self.next_pts = h.first_sample;
                         continue;
                     }
                     let n = fill.min(u64::from(self.info.max_block)) as u32;
-                    let (pts, at) = (self.next_pts, self.last_end);
                     self.silence(out, pts, n, at);
                     self.next_pts += u64::from(n);
                     if fill < gap && u64::from(n) == fill {
@@ -582,7 +691,6 @@ impl Demuxer for FlacDemuxer {
                     return Ok(true);
                 }
                 // The frame lies before the current position: drop it.
-                let loc = self.locate(&h)?;
                 self.consume_to(loc.end);
                 self.event(Event::CorruptFrame {
                     pts: h.first_sample,
@@ -592,8 +700,30 @@ impl Demuxer for FlacDemuxer {
                 continue;
             }
             let end_pts = h.first_sample.saturating_add(u64::from(h.block_size));
-            self.opts.limits.check_frames(end_pts)?;
+            if let Err(e) = self.opts.limits.check_frames(end_pts) {
+                if self.strict() {
+                    return Err(e);
+                }
+                // Resilient: the stream ends where the frame limit is exceeded.
+                self.event(Event::CorruptFrame {
+                    pts: h.first_sample,
+                    offset,
+                    frames: h.block_size,
+                });
+                self.done = true;
+                return Ok(false);
+            }
             let loc = self.locate(&h)?;
+            if let Some(from) = skipped
+                && !self.strict()
+            {
+                // Unparseable bytes were skipped but no samples are missing.
+                self.event(Event::CorruptFrame {
+                    pts: self.next_pts,
+                    offset: from,
+                    frames: 0,
+                });
+            }
             if !loc.crc_ok {
                 if self.strict() {
                     return Err(Error::Invalid {
@@ -603,6 +733,7 @@ impl Demuxer for FlacDemuxer {
                 }
                 self.silence(out, h.first_sample, h.block_size, offset);
             } else {
+                self.blocking.get_or_insert(h.blocking_variable);
                 out.track = 0;
                 out.pts = h.first_sample;
                 out.frames = h.block_size;

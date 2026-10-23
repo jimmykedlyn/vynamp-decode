@@ -853,7 +853,14 @@ fn garbage_before_the_first_frame_is_a_sync_error() {
     let mut z = open(file, &resilient());
     let (got, r, ev) = read_all(&mut z);
     assert_eq!(r, Ok(()));
-    assert!(ev.is_empty());
+    assert_eq!(
+        ev,
+        vec![Event::CorruptFrame {
+            pts: 0,
+            offset: first as u64,
+            frames: 0
+        }]
+    );
     assert_eq!(got.len(), 4);
     assert_eq!(got[0].offset, first as u64 + 33);
 }
@@ -1050,7 +1057,8 @@ fn frame_larger_than_the_streaminfo_maximum_is_corrupt() {
     assert_eq!(got.len(), 3);
     assert!(got[1].data.is_empty());
     assert_eq!(got[2].data, frames[2]);
-    assert_eq!(ev.len(), 1);
+    // The corrupt frame, and the body bytes skipped up to the next header.
+    assert_eq!(ev.len(), 2);
 }
 
 #[test]
@@ -1081,4 +1089,177 @@ fn empty_stream() {
             preroll: 0
         }
     );
+}
+
+// ------------------------------------------------------- fix round 1
+
+/// A header (valid CRC-8) for a fixed-size frame numbered `number`, with a junk body and no CRC-16.
+fn fake_header(number: u64, tail: usize) -> Vec<u8> {
+    let mut h = vec![0xFF, 0xF8, 12 << 4, 0x18];
+    h.extend(utf8(number));
+    h.push(crc8(&h));
+    h.extend(vec![0x55u8; tail]);
+    h
+}
+
+#[test]
+fn gap_fill_is_capped_by_max_frames_when_total_is_unknown() {
+    let a = syn_frame(true, 0, 4096, &payload(1, 100));
+    let b = syn_frame(true, 1 << 35, 4096, &payload(2, 100));
+    let c = syn_frame(true, (1 << 35) + 4096, 4096, &payload(3, 100));
+    let file = syn_stream(100, 4096, 0, 0, &[a, b, c]);
+    let mut opts = resilient();
+    opts.limits.max_frames = 10_000;
+    let mut d = open(file.clone(), &opts);
+    let (got, r, ev) = read_all(&mut d);
+    assert_eq!(r, Ok(()));
+    let silent: u64 = got
+        .iter()
+        .filter(|p| p.data.is_empty())
+        .map(|p| u64::from(p.frames))
+        .sum();
+    assert_eq!(silent, 10_000 - 4096);
+    assert_eq!(got.iter().filter(|p| !p.data.is_empty()).count(), 1);
+    assert!(!ev.is_empty());
+    // Strict keeps the sample-number error.
+    let mut opts = strict();
+    opts.limits.max_frames = 10_000;
+    let mut d = open(file, &opts);
+    let (_, r, _) = read_all(&mut d);
+    assert!(r.is_err());
+}
+
+#[test]
+fn frame_beyond_max_frames_ends_resilient_streams_and_fails_strict() {
+    let file = syn_stream(4096, 4096, 0, 0, &fixed_frames(6, 0));
+    let mut opts = resilient();
+    opts.limits.max_frames = 3 * 4096;
+    let mut d = open(file.clone(), &opts);
+    let (got, r, ev) = read_all(&mut d);
+    assert_eq!(r, Ok(()));
+    assert_eq!(got.len(), 3);
+    assert_eq!(ev.len(), 1);
+    let mut opts = strict();
+    opts.limits.max_frames = 3 * 4096;
+    let mut d = open(file, &opts);
+    let (got, r, _) = read_all(&mut d);
+    assert_eq!(got.len(), 3);
+    assert_eq!(r, Err(Error::Limit(LimitKind::Frames)));
+}
+
+#[test]
+fn header_without_a_valid_frame_does_not_justify_a_gap() {
+    let frames = fixed_frames(4, 0);
+    let (mut file, _) = build_with(&frames, 4 * 4096, |_, f| f.to_vec());
+    let first = open(file.clone(), &strict()).first_frame_offset() as usize;
+    file.splice(first..first, fake_header(1 << 20, 40));
+    let mut z = open(file, &resilient());
+    let (got, r, _) = read_all(&mut z);
+    assert_eq!(r, Ok(()));
+    assert_eq!(got.len(), 4);
+    for (i, p) in got.iter().enumerate() {
+        assert_eq!(p.pts, i as u64 * 4096);
+        assert_eq!(p.data, frames[i]);
+    }
+}
+
+fn ape_footer(items: usize, with_header: bool) -> Vec<u8> {
+    // Items are opaque here; only the sizes matter.
+    let size = (32 + items) as u32;
+    let mut footer = b"APETAGEX".to_vec();
+    footer.extend(2000u32.to_le_bytes());
+    footer.extend(size.to_le_bytes());
+    footer.extend(0u32.to_le_bytes());
+    let flags: u32 = if with_header { 0x8000_0000 } else { 0 };
+    footer.extend(flags.to_le_bytes());
+    footer.extend([0u8; 8]);
+    let mut tag = Vec::new();
+    if with_header {
+        let mut h = footer.clone();
+        h[20..24].copy_from_slice(&(flags | 0x2000_0000).to_le_bytes());
+        tag.extend(h);
+    }
+    tag.extend(vec![0xFFu8; items]);
+    tag.extend(footer);
+    tag
+}
+
+#[test]
+fn apev2_trailer_is_not_part_of_the_last_frame() {
+    let mut id3 = b"TAG".to_vec();
+    id3.resize(128, b' ');
+    for name in FIXTURES {
+        let base = fixture(name);
+        let want = clean(&base);
+        for variant in 0..4 {
+            let mut file = base.clone();
+            match variant {
+                0 => file.extend(ape_footer(0, false)),
+                1 => file.extend(ape_footer(70, true)),
+                2 => {
+                    file.extend(ape_footer(31, true));
+                    file.extend(&id3);
+                }
+                _ => {
+                    file.extend(ape_footer(5, false));
+                    file.extend(&id3);
+                }
+            }
+            for opts in [strict(), resilient()] {
+                let mut d = open(file.clone(), &opts);
+                let (got, r, ev) = read_all(&mut d);
+                assert_eq!(r, Ok(()), "{name} variant {variant}");
+                assert!(ev.is_empty());
+                assert_eq!(got, want, "{name} variant {variant}");
+            }
+        }
+    }
+}
+
+#[test]
+fn blocking_strategy_must_not_change() {
+    let mut frames = fixed_frames(4, 0);
+    // Frame 2 as a variable-size frame with the same first sample.
+    frames[2] = syn_frame(true, 2 * 4096, 4096, &payload(9, 100));
+    let (file, offs) = build_with(&frames, 4 * 4096, |_, f| f.to_vec());
+    let mut s = open(file, &strict());
+    let (got, r, _) = read_all(&mut s);
+    // The odd header is not a frame boundary. Consecutive valid frames also pass
+    // CRC-16 as one span (it starts from zero), so frame 1 absorbs frame 2 and the
+    // sample numbers expose the loss.
+    assert_eq!(got.len(), 2);
+    assert_eq!(got[1].data.len() as u64, offs[3] - offs[1]);
+    assert_eq!(invalid(&r), ("flac sample number", offs[3]));
+}
+
+#[test]
+fn short_block_is_only_valid_as_the_last_frame() {
+    let mut frames = fixed_frames(4, 0);
+    frames[1] = syn_frame(false, 1, 1000, &payload(9, 100));
+    let (file, _) = build_with(&frames, 4 * 4096, |_, f| f.to_vec());
+    let mut s = open(file, &strict());
+    let (got, r, _) = read_all(&mut s);
+    assert_eq!(got.len(), 1);
+    assert!(r.is_err());
+    // As the last frame it is fine (see fixed_stream_with_short_last_frame).
+}
+
+#[test]
+fn bisection_ignores_fake_headers_inside_frame_bodies() {
+    let frames: Vec<Vec<u8>> = (0..3000u64)
+        .map(|i| {
+            let mut body = payload(i, 120);
+            body.splice(10..10, fake_header(1 << 24, 0));
+            syn_frame(false, i, 4096, &body)
+        })
+        .collect();
+    let file = syn_stream(4096, 4096, 0, 3000 * 4096, &frames);
+    let len = file.len() as u64;
+    let (probe, bytes, _) = Probe::new(file);
+    let mut d = open_flac(Box::new(probe), &strict()).unwrap();
+    bytes.store(0, Ordering::SeqCst);
+    let t = 2900 * 4096 + 7;
+    let got = d.seek(0, t).unwrap();
+    assert_eq!((got.frame, got.preroll), (2900 * 4096, 7));
+    assert!(bytes.load(Ordering::SeqCst) < len / 4);
 }
