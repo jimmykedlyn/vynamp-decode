@@ -3,5 +3,9 @@
 version = 4
 
 [[package]]
+name = "agulha-core"
+version = "0.0.0"
+
+[[package]]
 name = "agulha-testkit"
 version = "0.0.0"
