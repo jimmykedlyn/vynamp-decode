@@ -477,10 +477,24 @@ fn partial_trailing_frame_is_dropped() {
     let mut d = open(file.clone(), &Options::default()).unwrap();
     assert_eq!(d.tracks()[0].frames, Some(10));
     assert!(read_all(&mut d).unwrap() == data[..40]);
-    // COMM claiming more frames than SSND holds is clamped to the chunk.
-    let mut f = file;
+}
+
+#[test]
+fn comm_frames_beyond_ssnd() {
+    let data = samples(s16(), 2, 11);
+    let mut f = aiff(s16(), RATE, 2, &data[..40], None);
     patch(&mut f, 22, &11u32.to_be_bytes());
-    let mut d = open(f, &Options::default()).unwrap();
+    let ssnd = find(&f, b"SSND") as u64;
+    // Strict: inconsistent header is rejected at the SSND chunk header.
+    match open(f.clone(), &Options::default()) {
+        Err(Error::Invalid {
+            what: "comm frames exceed ssnd",
+            offset,
+        }) => assert_eq!(offset, ssnd),
+        other => panic!("{:?}", other.map(|_| ())),
+    }
+    // Resilient: clamped to what the chunk holds.
+    let mut d = open(f, &resilient()).unwrap();
     assert_eq!(d.tracks()[0].frames, Some(10));
     assert!(read_all(&mut d).unwrap() == data[..40]);
 }

@@ -9,8 +9,14 @@
 //!   the first `COMM` and first `SSND` win, other chunks are skipped. Chunk
 //!   payloads are padded to an even size.
 //! - The frame count is the smaller of the `COMM` count and what the `SSND`
-//!   chunk (after its `offset`) can hold. If the data size is not a multiple of
-//!   the frame size, the trailing partial frame is dropped.
+//!   chunk (after its `offset`) can hold. If the `COMM` count exceeds what the
+//!   chunk holds, `Mode::Strict` fails to open with
+//!   `Invalid { what: "comm frames exceed ssnd" }` (offset of the `SSND` chunk
+//!   header) while `Mode::Resilient` clamps to the chunk. If the data size is
+//!   not a multiple of the frame size, the trailing partial frame is dropped.
+//! - When `SSND` precedes `COMM`, the walk must skip over the sample data to
+//!   find `COMM`; if the `SSND` size reaches past the end of the source, opening
+//!   fails with `Invalid { what: "unexpected eof" }` even in `Mode::Resilient`.
 //! - The data length comes from the `SSND` chunk header, so a file that ends
 //!   early is detected while reading: `Mode::Strict` fails with
 //!   `Invalid { what: "unexpected eof" }`, `Mode::Resilient` returns a short
@@ -72,6 +78,8 @@ fn read_full(src: &mut dyn Source, buf: &mut [u8]) -> Result<usize> {
 /// Location of the `SSND` sample data.
 #[derive(Clone, Copy)]
 struct Ssnd {
+    /// Absolute position of the chunk header.
+    header: u64,
     data_start: u64,
     data_len: u64,
 }
@@ -89,6 +97,12 @@ pub fn open_aiff(mut src: Box<dyn Source>, opts: &Options) -> Result<AiffDemuxer
     };
     let block = comm.block();
     let total = u64::from(comm.frames).min(ssnd.data_len / block);
+    if total < u64::from(comm.frames) && opts.mode == Mode::Strict {
+        return Err(Error::Invalid {
+            what: "comm frames exceed ssnd",
+            offset: ssnd.header,
+        });
+    }
     opts.limits.check_frames(total)?;
     src.seek(ssnd.data_start)?;
     let track = Track {
@@ -178,13 +192,15 @@ fn walk(r: &mut ByteReader<'_>, src_len: Option<u64>, opts: &Options) -> Result<
                     offset: start,
                 })?;
                 ssnd = Some(Ssnd {
+                    header: start,
                     data_start: body + 8 + offset,
                     data_len,
                 });
             }
             _ => {}
         }
-        // Done as soon as both are known; the sample data is never skipped over.
+        // Done as soon as both are known, without skipping the chunk just read
+        // (only an SSND that precedes COMM has its data skipped, below).
         if let (Some(c), Some(s)) = (comm, ssnd) {
             return Ok((c, s));
         }
