@@ -9,6 +9,7 @@ mod crc;
 mod error;
 mod event;
 mod limits;
+mod md5;
 mod packet;
 mod registry;
 mod sample;
@@ -24,6 +25,7 @@ pub use crc::{crc8, crc16};
 pub use error::{Error, LimitKind, Result};
 pub use event::Event;
 pub use limits::{Limits, Mode, Options};
+pub use md5::Md5;
 pub use packet::Packet;
 pub use registry::{
     CodecDescriptor, ContainerDescriptor, OpenFn, Registry, Verification, skip_id3v2,
