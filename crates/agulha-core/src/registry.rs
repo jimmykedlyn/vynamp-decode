@@ -1,6 +1,6 @@
 //! Container and codec registry with format probing.
 
-use crate::{CodecId, Decoder, Demuxer, Error, Options, Result, Source, Track};
+use crate::{CodecId, Decoder, Demuxer, Error, LimitKind, Limits, Options, Result, Source, Track};
 
 /// How thoroughly a codec has been verified.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,6 +43,50 @@ pub struct CodecDescriptor {
 /// Number of bytes read from the start of a source when probing.
 const PROBE_BYTES: usize = 4096;
 
+/// Fills `buf` from `src`, stopping early only at the end of data.
+fn read_full(src: &mut dyn Source, buf: &mut [u8]) -> Result<usize> {
+    let mut got = 0;
+    while got < buf.len() {
+        let n = src.read(&mut buf[got..])?;
+        if n == 0 {
+            break;
+        }
+        got += n;
+    }
+    Ok(got)
+}
+
+/// Returns the offset just past the ID3v2 tag(s) that start the stream, or 0.
+///
+/// Each tag is `"ID3"`, version, revision, flags, a 4-byte synchsafe size and
+/// an optional 10-byte footer (flag 0x10). Skipping stops at the first header
+/// that is truncated or malformed (version byte 0xFF or a size byte >= 0x80);
+/// the offset then points at that header.
+fn skip_id3v2(src: &mut dyn Source, limits: &Limits) -> Result<u64> {
+    let mut offset = 0u64;
+    loop {
+        src.seek(offset)?;
+        let mut h = [0u8; 10];
+        if read_full(src, &mut h)? < h.len() || &h[..3] != b"ID3" {
+            return Ok(offset);
+        }
+        if h[3] == 0xFF || h[4] == 0xFF || h[6..].iter().any(|&b| b >= 0x80) {
+            return Ok(offset);
+        }
+        let size = h[6..]
+            .iter()
+            .fold(0u64, |acc, &b| (acc << 7) | u64::from(b));
+        let footer = if h[5] & 0x10 != 0 { 10 } else { 0 };
+        let end = offset
+            .checked_add(10 + size + footer)
+            .ok_or(Error::Limit(LimitKind::Metadata))?;
+        if end > u64::from(limits.max_metadata_bytes) {
+            return Err(Error::Limit(LimitKind::Metadata));
+        }
+        offset = end;
+    }
+}
+
 /// A set of known containers and codecs.
 #[derive(Default)]
 pub struct Registry {
@@ -68,25 +112,30 @@ impl Registry {
 
     /// Identifies the container of `src`.
     ///
-    /// Reads up to 4096 bytes from the start and picks the highest non-zero
+    /// Skips any ID3v2 tags at the start of the stream (their combined size is
+    /// bounded by `limits.max_metadata_bytes`, else `Limit(Metadata)`; a
+    /// malformed tag header is not skipped), reads up to 4096 bytes after
+    /// them and picks the highest non-zero
     /// score; ties go to the descriptor whose extensions contain `hint_ext`
     /// (case-insensitive), else to the first registered. The source is left
-    /// at position 0. Returns `Unsupported("container")` if nothing matches.
+    /// at position 0; demuxers handle the tags themselves. Returns `Unsupported("container")` if nothing matches.
     pub fn probe(
         &self,
         src: &mut dyn Source,
         hint_ext: Option<&str>,
+        limits: &Limits,
     ) -> Result<&'static ContainerDescriptor> {
-        src.seek(0)?;
-        let mut head = vec![0u8; PROBE_BYTES];
-        let mut got = 0;
-        while got < head.len() {
-            let n = src.read(&mut head[got..])?;
-            if n == 0 {
-                break;
+        let offset = match skip_id3v2(src, limits) {
+            Ok(o) => o,
+            Err(e) => {
+                // Best effort: the error being reported matters more.
+                let _ = src.seek(0);
+                return Err(e);
             }
-            got += n;
-        }
+        };
+        src.seek(offset)?;
+        let mut head = vec![0u8; PROBE_BYTES];
+        let got = read_full(src, &mut head)?;
         head.truncate(got);
         src.seek(0)?;
 

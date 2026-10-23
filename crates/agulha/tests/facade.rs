@@ -1,7 +1,7 @@
 use agulha::{Reader, default_registry, open};
 use agulha_core::{
-    AudioBuffer, CodecId, ContainerDescriptor, Demuxer, Endian, Error, Options, Packet,
-    PcmEncoding, PcmSpec, Registry, Result, SeekTo, SliceSource, Source, Track, VecSource,
+    AudioBuffer, CodecId, ContainerDescriptor, Demuxer, Endian, Error, LimitKind, Limits, Options,
+    Packet, PcmEncoding, PcmSpec, Registry, Result, SeekTo, SliceSource, Source, Track, VecSource,
 };
 use agulha_testkit::writers::{WavVariant, aiff, wav};
 
@@ -315,6 +315,95 @@ fn cancel_mid_stream() {
     assert_eq!(r.read(&mut buf), Err(Error::Cancelled));
 }
 
+// ---- ID3v2 skipping in probe ----
+
+/// An ID3v2 tag header (10 bytes) followed by `size` zero bytes (and a
+/// 10-byte footer if `footer`).
+fn id3v2(size: usize, footer: bool) -> Vec<u8> {
+    let mut t = b"ID3\x04\x00".to_vec();
+    t.push(if footer { 0x10 } else { 0 });
+    t.extend([
+        ((size >> 21) & 0x7F) as u8,
+        ((size >> 14) & 0x7F) as u8,
+        ((size >> 7) & 0x7F) as u8,
+        (size & 0x7F) as u8,
+    ]);
+    t.resize(10 + size, 0);
+    if footer {
+        t.extend(b"3DI\x04\x00\x10\x00\x00\x00\x00");
+    }
+    t
+}
+
+fn small_wav() -> Vec<u8> {
+    wav(SPEC16, 8000, 1, &[0u8; 64], WavVariant::Riff)
+}
+
+fn probe_name(prefix: Vec<u8>, limits: &Limits) -> Result<&'static str> {
+    let mut file = prefix;
+    file.extend(small_wav());
+    let mut src = VecSource::new(file);
+    let r = default_registry().probe(&mut src, None, limits);
+    assert_eq!(src.position(), 0, "probe must rewind the source");
+    r.map(|d| d.name)
+}
+
+#[cfg(feature = "riff")]
+#[test]
+fn probe_skips_large_id3v2_tag() {
+    let l = Limits::default();
+    assert_eq!(probe_name(id3v2(300_000, false), &l), Ok("riff"));
+    assert_eq!(probe_name(id3v2(300_000, true), &l), Ok("riff"));
+    // Several tags in a row.
+    let mut two = id3v2(5000, false);
+    two.extend(id3v2(70_000, true));
+    assert_eq!(probe_name(two, &l), Ok("riff"));
+    // Empty tag.
+    assert_eq!(probe_name(id3v2(0, false), &l), Ok("riff"));
+}
+
+#[cfg(feature = "riff")]
+#[test]
+fn probe_malformed_id3v2_does_not_skip() {
+    let l = Limits::default();
+    for bad in [[0xFF; 4], [0, 0, 0, 0x80], [0x80, 0, 0, 0]] {
+        let mut t = b"ID3\x04\x00\x00".to_vec();
+        t.extend(bad);
+        t.resize(2000, 0);
+        assert_eq!(
+            probe_name(t, &l),
+            Err(Error::Unsupported("container")),
+            "{bad:?}"
+        );
+    }
+    // Bad version byte.
+    let mut t = id3v2(100, false);
+    t[3] = 0xFF;
+    assert_eq!(probe_name(t, &l), Err(Error::Unsupported("container")));
+    // Tag declaring more than the file holds.
+    let mut t = id3v2(0, false);
+    t[9] = 0x7F;
+    assert_eq!(probe_name(t, &l), Err(Error::Unsupported("container")));
+}
+
+#[cfg(feature = "riff")]
+#[test]
+fn probe_id3v2_beyond_metadata_limit_is_a_limit_error() {
+    let l = Limits {
+        max_metadata_bytes: 100_000,
+        ..Limits::default()
+    };
+    assert_eq!(probe_name(id3v2(99_980, false), &l), Ok("riff"));
+    assert_eq!(
+        probe_name(id3v2(100_000, false), &l),
+        Err(Error::Limit(LimitKind::Metadata))
+    );
+    // Cumulative across several tags, footer included.
+    let mut two = id3v2(60_000, true);
+    two.extend(id3v2(60_000, false));
+    assert_eq!(probe_name(two, &l), Err(Error::Limit(LimitKind::Metadata)));
+}
+
 // ---- probe ties ----
 
 fn tie_open(_: Box<dyn Source>, _: &Options) -> Result<Box<dyn Demuxer>> {
@@ -352,15 +441,43 @@ fn probe_tie_resolved_by_extension() {
         reg.add_container(d);
     }
     let mut src = VecSource::new(vec![1, 2, 3, 4]);
-    assert_eq!(reg.probe(&mut src, Some("bbb")).unwrap().name, "b");
-    assert_eq!(reg.probe(&mut src, Some("bbx")).unwrap().name, "b");
+    assert_eq!(
+        reg.probe(&mut src, Some("bbb"), &Limits::default())
+            .unwrap()
+            .name,
+        "b"
+    );
+    assert_eq!(
+        reg.probe(&mut src, Some("bbx"), &Limits::default())
+            .unwrap()
+            .name,
+        "b"
+    );
     assert_eq!(src.position(), 0);
-    assert_eq!(reg.probe(&mut src, Some("aaa")).unwrap().name, "a");
+    assert_eq!(
+        reg.probe(&mut src, Some("aaa"), &Limits::default())
+            .unwrap()
+            .name,
+        "a"
+    );
     // No matching hint: first registered among the best.
-    assert_eq!(reg.probe(&mut src, Some("zzz")).unwrap().name, "a");
-    assert_eq!(reg.probe(&mut src, None).unwrap().name, "a");
+    assert_eq!(
+        reg.probe(&mut src, Some("zzz"), &Limits::default())
+            .unwrap()
+            .name,
+        "a"
+    );
+    assert_eq!(
+        reg.probe(&mut src, None, &Limits::default()).unwrap().name,
+        "a"
+    );
     // Hint of a lower-scoring descriptor does not override a higher score.
-    assert_eq!(reg.probe(&mut src, Some("low")).unwrap().name, "a");
+    assert_eq!(
+        reg.probe(&mut src, Some("low"), &Limits::default())
+            .unwrap()
+            .name,
+        "a"
+    );
 }
 
 #[test]
@@ -369,7 +486,7 @@ fn probe_nothing_matches() {
     reg.add_container(&NONE);
     let mut src = VecSource::new(vec![0; 10]);
     assert_eq!(
-        reg.probe(&mut src, None).err(),
+        reg.probe(&mut src, None, &Limits::default()).err(),
         Some(Error::Unsupported("container"))
     );
     assert_eq!(src.position(), 0);

@@ -35,7 +35,7 @@ impl Reader {
         hint_ext: Option<&str>,
     ) -> Result<Self> {
         opts.cancel.check()?;
-        let container = registry.probe(src.as_mut(), hint_ext)?;
+        let container = registry.probe(src.as_mut(), hint_ext, &opts.limits)?;
         let demuxer = (container.open)(src, &opts)?;
         let track = demuxer
             .tracks()
