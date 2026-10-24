@@ -136,6 +136,7 @@ impl FlacDemuxer {
         self.eof = false;
         self.last_end = off;
         self.fill_left = 0;
+        self.skipped = None;
         Ok(())
     }
 
@@ -1065,7 +1066,10 @@ impl Demuxer for FlacDemuxer {
             });
         }
         let (off, pts) = self.seek_start(target)?;
-        self.scan_to(target, off, pts)
+        let to = self.scan_to(target, off, pts);
+        // Bytes skipped on the way to the target are not part of the new position.
+        self.skipped = None;
+        to
     }
 
     fn drain_events(&mut self, out: &mut Vec<Event>) {

@@ -13,7 +13,7 @@
   Legacy variable block size streams (pre-2007 layout) are recognised.
 - FLAC oracle corpus (FFmpeg-generated, dev-only, 22 files with PCM references; the pinned FFmpeg
   cannot write 8-bit FLAC) and a conformance subset of the CC0 IETF `flac-test-files` (20 of the
-  67 `subset` files committed, all 67 pass with the default limits when run from a clone; the
+  64 `subset` FLAC files committed, all 64 pass with the default limits when run from a clone; the
   `faulty` files are rejected in Strict mode except file 10, an invalid Vorbis comment block,
   which is validated in plan 04). FLAC is therefore `conformance`.
 - Strict mode rejects more samples than STREAMINFO declares and non-final blocks below 16

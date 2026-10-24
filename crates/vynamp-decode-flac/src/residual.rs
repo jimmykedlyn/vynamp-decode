@@ -26,9 +26,10 @@ pub(crate) fn decode_residual(r: &mut BitReader, out: &mut [i64], order: usize) 
     let partitions = 1usize << partition_order;
     // "The partition order MUST be such that the block size is evenly divisible by the
     // number of partitions" and "(block size >> partition order) is larger than the
-    // predictor order".
+    // predictor order". Reference decoders accept equality (a first partition that
+    // holds only the warm-up samples and no residual), so this does too.
     let per_partition = block_size >> partition_order;
-    if !block_size.is_multiple_of(partitions) || per_partition <= order {
+    if !block_size.is_multiple_of(partitions) || per_partition < order {
         return Err(invalid(r, "flac partition order"));
     }
 

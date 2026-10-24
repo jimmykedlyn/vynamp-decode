@@ -146,12 +146,18 @@ fn parse_seek_table(data: &[u8]) -> Vec<SeekPoint> {
         .collect()
 }
 
+/// Most metadata blocks (padding included) accepted in one stream.
+const MAX_BLOCKS: usize = 65_536;
+/// Size of a metadata block header, counted toward the metadata limit.
+const BLOCK_HEADER_LEN: u64 = 4;
+
 /// Reads the metadata blocks that follow the `fLaC` marker.
 ///
 /// Returns the STREAMINFO, the seek points, every non-padding block (in file
 /// order, STREAMINFO first) and the absolute offset of the first frame. The
-/// total size of the non-padding blocks is bounded by
-/// `limits.max_metadata_bytes`; padding is skipped without being read.
+/// total size of the non-padding blocks, headers included, is bounded by
+/// `limits.max_metadata_bytes`, and their number by 65 536; padding is skipped
+/// without being read.
 pub(crate) fn read_metadata(
     r: &mut ByteReader,
     limits: &Limits,
@@ -160,7 +166,12 @@ pub(crate) fn read_metadata(
     let mut seek = Vec::new();
     let mut blocks = Vec::new();
     let mut total = 0u64;
+    let mut count = 0usize;
     loop {
+        count += 1;
+        if count > MAX_BLOCKS {
+            return Err(Error::Limit(LimitKind::Metadata));
+        }
         let start = r.position();
         let head = r.u8()?;
         let last = head & 0x80 != 0;
@@ -199,7 +210,7 @@ pub(crate) fn read_metadata(
             }
             BlockKind::Padding => r.skip(len)?,
             _ => {
-                total += len;
+                total += len + BLOCK_HEADER_LEN;
                 if total > u64::from(limits.max_metadata_bytes) {
                     return Err(Error::Limit(LimitKind::Metadata));
                 }

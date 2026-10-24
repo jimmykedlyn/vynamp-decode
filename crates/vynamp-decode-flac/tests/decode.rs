@@ -274,6 +274,35 @@ fn rice_method_1_and_partitions() {
 }
 
 #[test]
+fn first_partition_may_be_empty_when_it_holds_only_the_warm_up() {
+    // 16 samples, partition order 3 (2 per partition), predictor order 2: the first
+    // partition has no residual samples.
+    let s = signal(16, 9000);
+    let order = 2usize;
+    let mut b = Bits::default();
+    sub_header(&mut b, 8 + order as u32, 0);
+    for &w in &s[..order] {
+        b.signed(w, 16);
+    }
+    let res: Vec<i32> = (order..s.len())
+        .map(|i| (s[i] - fixed_pred(&s, i, order)) as i32)
+        .collect();
+    b.put(0, 2);
+    b.put(3, 4);
+    b.put(5, 4); // the empty partition still carries a parameter
+    let mut pos = 0;
+    for _ in 1..8 {
+        b.put(9, 4);
+        for &r in &res[pos..pos + 2] {
+            b.rice(r, 9);
+        }
+        pos += 2;
+    }
+    let out = decode(1, 16, frame(0, 16, 16, &b), 16).unwrap();
+    assert_eq!(i16s(&out, 0), narrow(&s));
+}
+
+#[test]
 fn lpc_order_2() {
     let s = signal(120, 15000);
     let (c0, c1, shift) = (3i64, -1i64, 1u32);
@@ -496,7 +525,7 @@ fn rejects_malformed_subframes() {
         "flac partition order"
     );
 
-    // (block size >> order) must exceed the predictor order: 8 >> 3 = 1 <= 2.
+    // (block size >> order) must not be below the predictor order: 8 >> 3 = 1 < 2.
     let mut b = Bits::default();
     sub_header(&mut b, 10, 0);
     b.signed(0, 16);

@@ -1585,3 +1585,39 @@ fn a_short_final_frame_may_be_followed_by_trailers_and_junk() {
         assert_eq!(got.len(), 4);
     }
 }
+
+#[test]
+fn a_seek_discards_pending_skipped_byte_reports() {
+    // Frame 1 is far larger than the STREAMINFO hint, so its body is skipped as junk
+    // while the seek scans past it; that must not surface as an event afterwards.
+    let frames = vec![
+        syn_frame(false, 0, 4096, &payload(1, 100)),
+        syn_frame(false, 1, 4096, &payload(2, 70_000)),
+        syn_frame(false, 2, 4096, &payload(3, 100)),
+        syn_frame(false, 3, 4096, &payload(4, 100)),
+    ];
+    // A seek table with one entry at sample 0 makes the seek scan from the start.
+    let mut table = Vec::new();
+    table.extend(0u64.to_be_bytes());
+    table.extend(0u64.to_be_bytes());
+    table.extend(4096u16.to_be_bytes());
+    let mut file = b"fLaC".to_vec();
+    file.extend(block(0, false, &si_body(4096, 4096, 300, 4 * 4096)));
+    file.extend(block(3, true, &table));
+    file.extend(frames.concat());
+    let mut d = open(file, &resilient());
+    let to = d.seek(0, 2 * 4096 + 5).unwrap();
+    assert_eq!(
+        to,
+        SeekTo {
+            frame: 2 * 4096,
+            preroll: 5
+        }
+    );
+    let mut p = Packet::default();
+    assert!(d.next_packet(&mut p).unwrap());
+    assert_eq!((p.pts, p.data.as_slice()), (2 * 4096, frames[2].as_slice()));
+    let mut ev = Vec::new();
+    d.drain_events(&mut ev);
+    assert!(ev.is_empty(), "{ev:?}");
+}

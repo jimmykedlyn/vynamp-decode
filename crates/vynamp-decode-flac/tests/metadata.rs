@@ -192,12 +192,62 @@ fn metadata_over_limit() {
     ));
     let opts = Options {
         limits: Limits {
-            max_metadata_bytes: 44,
+            max_metadata_bytes: 52,
             ..Limits::default()
         },
         ..Options::default()
     };
     assert!(open(f, &opts).is_ok());
+}
+
+#[test]
+fn block_headers_count_toward_the_metadata_limit() {
+    // Each block costs its 4-byte header plus its body: 38 + 4 + 6 * 4 = 66.
+    let mut blocks = vec![block(0, false, &std_body())];
+    blocks.extend((0..6).map(|_| block(2, false, &[])));
+    blocks.push(block(2, true, &[]));
+    let f = stream(&blocks);
+    let over = Options {
+        limits: Limits {
+            max_metadata_bytes: 65,
+            ..Limits::default()
+        },
+        ..Options::default()
+    };
+    assert!(matches!(
+        open(f.clone(), &over),
+        Err(Error::Limit(LimitKind::Metadata))
+    ));
+    let at = Options {
+        limits: Limits {
+            max_metadata_bytes: 66,
+            ..Limits::default()
+        },
+        ..Options::default()
+    };
+    assert!(open(f, &at).is_ok());
+}
+
+#[test]
+fn the_number_of_metadata_blocks_is_capped() {
+    for kind in [2u8, 1] {
+        let mut v = stream(&[block(0, false, &std_body())]);
+        for _ in 0..65_536 {
+            v.extend(block(kind, false, &[]));
+        }
+        v.extend(block(2, true, &[]));
+        assert!(matches!(
+            open(v, &Options::default()),
+            Err(Error::Limit(LimitKind::Metadata))
+        ));
+    }
+    // 65 536 blocks in total are fine.
+    let mut v = stream(&[block(0, false, &std_body())]);
+    for _ in 0..65_534 {
+        v.extend(block(2, false, &[]));
+    }
+    v.extend(block(2, true, &[]));
+    assert!(open(v, &Options::default()).is_ok());
 }
 
 #[test]
