@@ -44,18 +44,13 @@ fn busy(crc: bool) -> L1Spec {
 }
 
 #[test]
-fn layer_three_and_foreign_codecs_are_unsupported() {
+fn foreign_codecs_are_unsupported_and_bad_tracks_invalid() {
     let o = Options::default();
-    for (codec, what) in [
-        (CodecId::Mp3, "mpeg layer III decoding"),
-        (CodecId::Flac, "not an mpeg audio track"),
-    ] {
-        match MpegDecoder::new(&track(codec, 48000, 2), &o) {
-            Err(Error::Unsupported(w)) => assert_eq!(w, what),
-            other => panic!("{:?}", other.err()),
-        }
+    match MpegDecoder::new(&track(CodecId::Flac, 48000, 2), &o) {
+        Err(Error::Unsupported(w)) => assert_eq!(w, "not an mpeg audio track"),
+        other => panic!("{:?}", other.err()),
     }
-    for codec in [CodecId::Mp1, CodecId::Mp2] {
+    for codec in [CodecId::Mp1, CodecId::Mp2, CodecId::Mp3] {
         assert!(MpegDecoder::new(&track(codec.clone(), 48000, 2), &o).is_ok());
         assert!(MpegDecoder::new(&track(codec.clone(), 48000, 3), &o).is_err());
         assert!(MpegDecoder::new(&track(codec.clone(), 48000, 0), &o).is_err());

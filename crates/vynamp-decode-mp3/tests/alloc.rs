@@ -63,3 +63,38 @@ fn layer_two_decoding_does_not_allocate() {
         assert_eq!(allocations_on_this_thread(), before, "{name}");
     }
 }
+
+#[test]
+fn layer_three_decoding_does_not_allocate() {
+    for (name, rate, channels) in [
+        ("l3-cbr128-44k-joint", 44100, 2u16),
+        ("l3-vbr-v2-44k", 44100, 2),
+        ("l3-mono-44k-64k", 44100, 1),
+        ("l3-mpeg2-22k-64k", 22050, 2),
+        ("l3-mpeg25-8k-mono", 8000, 1),
+    ] {
+        let data = fixture(&format!("{name}.mp3"));
+        let packets: Vec<Packet> = split_frames(&data)
+            .into_iter()
+            .map(|(offset, f)| Packet {
+                frames: if rate >= 32000 { 1152 } else { 576 },
+                offset,
+                data: f.to_vec(),
+                ..Packet::default()
+            })
+            .collect();
+        let mut d =
+            MpegDecoder::new(&track(CodecId::Mp3, rate, channels), &Options::default()).unwrap();
+        let mut out = AudioBuffer::new();
+        // Warm up on the whole stream: the reservoir buffers reach their size.
+        for p in &packets {
+            d.decode(p, &mut out).unwrap();
+        }
+        d.reset();
+        let before = allocations_on_this_thread();
+        for p in &packets {
+            d.decode(p, &mut out).unwrap();
+        }
+        assert_eq!(allocations_on_this_thread(), before, "{name}");
+    }
+}

@@ -82,16 +82,28 @@ fn band_tables_cover_exactly_576_lines() {
             mixed.widths.iter().map(|&w| usize::from(w)).sum::<usize>(),
             576
         );
-        assert_eq!(mixed.n_long, if v == V1 { 8 } else { 6 });
+        // The 8 kHz row of the source starts its short bands after three long entries.
+        assert_eq!(
+            mixed.n_long,
+            match (v, row) {
+                (V1, _) => 8,
+                (_, 1) => 3,
+                _ => 6,
+            }
+        );
         assert_eq!(mixed.n_long + mixed.n_short, mixed.widths.len());
         assert_eq!(mixed.n_short % 3, 0);
         let first: usize = mixed.widths[..mixed.n_long]
             .iter()
             .map(|&w| usize::from(w))
             .sum();
-        // The two lowest subbands (36 lines) are long; the 8 kHz row of the source is the
-        // one that deviates (its "long" entries run to the end of a short band).
-        assert_eq!(first, if row == 1 { 48 } else { 36 }, "row {row}");
+        // The two lowest subbands (36 lines) are long at every rate.
+        assert_eq!(first, 36, "row {row}");
+        // Entries that carry a scalefactor: 21 long, 36 short, 35 (MPEG-1) or 33 (MPEG-2/2.5)
+        // mixed.
+        assert_eq!(long.n_sf, 21);
+        assert_eq!(short.n_sf, 36);
+        assert_eq!(mixed.n_sf, if v == V1 { 35 } else { 33 });
         // Block types 1 and 3 use the long bands.
         assert_eq!(layout(v, rate, &gi(1, false, 0)).n_long, 22);
         assert_eq!(layout(v, rate, &gi(3, false, 0)).n_long, 22);
@@ -280,6 +292,17 @@ fn lsf_intensity_right_channel_variant() {
     assert_eq!(&s.values[7..21], &[3; 14]);
     assert_eq!(s.illegal, (1u64 << 21) - 1);
     assert!(!s.preflag);
+    // Zero bits: every value is 0 = 2^0 - 1, so a partition of width 0 is entirely illegal.
+    let zeros = W {
+        bytes: vec![0; 32],
+        bits: 256,
+    };
+    let (s, _) = read_with(V2, 22050, &gi(0, false, 381), 0, true, &[0; 40], &zeros);
+    assert_eq!(
+        s.illegal,
+        (0b111 << 18) | 0b11_1111,
+        "width 0 partitions only"
+    );
     // The same value on the left channel is an ordinary scalefactor.
     let (s, _) = read_with(V2, 22050, &gi(0, false, 100), 0, false, &[0; 40], &w);
     assert_eq!(s.illegal, 0);
@@ -288,14 +311,17 @@ fn lsf_intensity_right_channel_variant() {
     assert_eq!(pos, 6 * 2 + 6 * 2);
     assert_eq!(&s.values[..6], &[0; 6]);
     assert_eq!(&s.values[6..18], &[3; 12]);
-    assert_eq!(s.illegal, ((1u64 << 12) - 1) << 6);
+    // Partitions 0 (6 values) and 3 (3 values) have width 0: no position can be sent, which
+    // the standard's `is_max = 2^0 - 1 = 0` makes illegal too.
+    assert_eq!(s.illegal, (1u64 << 21) - 1);
     // compress 500 -> sfc 250 - 244 = 6: slen (2, 0, 0, 0), bands 8 8 5 0; no preflag even
     // though the field is >= 500.
     let (s, pos) = read_with(V2, 22050, &gi(0, false, 500), 0, true, &[0; 40], &w);
     assert_eq!(pos, 16);
     assert!(!s.preflag);
     assert_eq!(&s.values[..8], &[3; 8]);
-    assert_eq!(s.illegal, 0xFF);
+    // Partitions 1 and 2 (13 values) have width 0.
+    assert_eq!(s.illegal, (1u64 << 21) - 1);
 }
 
 #[test]

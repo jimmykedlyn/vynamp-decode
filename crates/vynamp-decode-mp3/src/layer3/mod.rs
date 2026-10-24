@@ -3,8 +3,10 @@
 //!
 //! [`decode_granules`] takes one frame and produces, for every granule and channel, the integer
 //! spectral lines (before requantization), the raw scalefactors and the side information that
-//! the synthesis path needs. Requantization, stereo processing, the inverse MDCT and the
-//! polyphase synthesis consume this output.
+//! the synthesis path needs. [`Layer3Decoder`] runs the rest of the chain on that output:
+//! requantization, joint stereo, short block reordering, alias reduction, the inverse MDCT
+//! with overlap-add, and the polyphase synthesis shared with Layers I and II. Each module of
+//! the chain documents its step.
 //!
 //! # Frame layout and the reservoir
 //!
@@ -24,29 +26,33 @@
 //! Resilient: `CorruptFrame`). A frame that fails to decode still adds its main data to the
 //! reservoir, because the following frames may point into it.
 
+mod alias;
 mod bits;
 mod codes;
 mod huffman;
+mod imdct;
+mod requant;
 mod reservoir;
 mod scalefactors;
 mod sideinfo;
+mod stereo;
 mod tables;
 #[cfg(test)]
 mod testenc;
 #[cfg(test)]
 mod tests;
 
+use crate::synth::Synthesis;
 use bits::Bits;
+use imdct::Overlap;
 use reservoir::Reservoir;
 use scalefactors::Params;
 use sideinfo::SideInfo;
 use vynamp_decode_core::{Error, Result, crc16_mpeg, crc16_update};
-use vynamp_decode_mpa::{FrameHeader, MpegVersion};
+use vynamp_decode_mpa::{ChannelMode, FrameHeader, MpegVersion};
 
 pub(crate) use scalefactors::Layout;
 pub(crate) use sideinfo::GranuleInfo;
-#[allow(unused_imports)] // for the requantizer
-pub(crate) use tables::PRETAB;
 
 /// Whether the data of a granule was available.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -136,7 +142,9 @@ impl FrameData {
         })
     }
 
-    /// Some granule could not be decoded for lack of reservoir data.
+    /// Some granule could not be decoded for lack of reservoir data. (The decoder turns such
+    /// granules into silence; the tests use this to check where they occur.)
+    #[cfg(test)]
     pub(crate) fn needs_preroll(&self) -> bool {
         (0..self.granules).any(|g| {
             (0..self.channels).any(|c| self.gr[g][c].status == GranuleStatus::NeedsPreroll)
@@ -155,6 +163,116 @@ impl Layer3 {
     /// Forgets the reservoir (after a seek).
     pub(crate) fn reset(&mut self) {
         self.reservoir.clear();
+    }
+}
+
+/// Decoder state of a Layer III stream: the bit reservoir, the overlap of the inverse MDCT of
+/// each channel and the scratch buffers of the synthesis path. Nothing is allocated per frame
+/// once the reservoir buffers have reached their size.
+pub(crate) struct Layer3Decoder {
+    bits: Layer3,
+    frame: Box<FrameData>,
+    overlap: [Overlap; 2],
+    /// Requantized lines of both channels.
+    xr: Box<[[f32; 576]; 2]>,
+}
+
+impl Layer3Decoder {
+    pub(crate) fn new() -> Self {
+        requant::warm_up();
+        stereo::warm_up();
+        alias::warm_up();
+        imdct::warm_up();
+        Self {
+            bits: Layer3::default(),
+            frame: FrameData::new(),
+            overlap: [Overlap::new(), Overlap::new()],
+            xr: Box::new([[0.0; 576]; 2]),
+        }
+    }
+
+    /// Forgets the reservoir and the overlap (after a seek).
+    pub(crate) fn reset(&mut self) {
+        self.bits.reset();
+        self.clear_overlap();
+    }
+
+    /// Forgets the overlap only (after a frame was replaced by silence).
+    pub(crate) fn clear_overlap(&mut self) {
+        for o in &mut self.overlap {
+            o.clear();
+        }
+    }
+
+    /// Decodes one frame into `pcm` (576 samples per granule and channel) through the
+    /// per-channel `synth` filterbanks and returns the number of samples per channel.
+    ///
+    /// A granule that could not be decoded for lack of reservoir data
+    /// ([`GranuleStatus::NeedsPreroll`]) becomes silence and restarts the channel's overlap and
+    /// filterbank, so that the stream resumes cleanly.
+    ///
+    /// # Errors
+    /// The errors of [`decode_granules`]; the filterbank state is untouched then.
+    pub(crate) fn decode(
+        &mut self,
+        frame: &[u8],
+        header: &FrameHeader,
+        offset: u64,
+        synth: &mut [Synthesis; 2],
+        pcm: &mut [[f32; crate::tables::MAX_SAMPLES]; 2],
+    ) -> Result<usize> {
+        decode_granules(&mut self.bits, frame, header, offset, &mut self.frame)?;
+        let channels = self.frame.channels;
+        let joint = header.channel_mode == ChannelMode::JointStereo && channels == 2;
+        let tools = stereo::Stereo {
+            version: header.version,
+            ms: joint && header.mode_ext & 2 != 0,
+            intensity: joint && header.mode_ext & 1 != 0,
+        };
+        let mut slots = [[0.0f32; 32]; 18];
+        let mut slot_pcm = [0.0f32; 32];
+        for gr in 0..self.frame.granules {
+            let granules = &self.frame.gr[gr];
+            let mut present = [false; 2];
+            for ch in 0..channels {
+                present[ch] = granules[ch].status == GranuleStatus::Decoded;
+                if present[ch] {
+                    requant::requantize(&granules[ch], &mut self.xr[ch]);
+                } else {
+                    self.xr[ch].fill(0.0);
+                }
+            }
+            let mut used = [granules[0].used_lines, granules[1].used_lines];
+            if (tools.ms || tools.intensity) && present == [true, true] {
+                let [l, r] = &mut *self.xr;
+                stereo::process(l, r, [&granules[0], &granules[1]], tools);
+                used = [used[0].max(used[1]); 2];
+            }
+            for ch in 0..channels {
+                let out = &mut pcm[ch][gr * 576..(gr + 1) * 576];
+                if !present[ch] {
+                    self.overlap[ch].clear();
+                    synth[ch].reset();
+                    out.fill(0.0);
+                    continue;
+                }
+                let info = &granules[ch].info;
+                let xr = &mut self.xr[ch];
+                if info.block_type == 2 {
+                    requant::reorder(xr, &granules[ch].layout);
+                }
+                if info.block_type != 2 || info.mixed_block {
+                    alias::reduce(xr, used[ch], info.block_type == 2);
+                }
+                self.overlap[ch].granule(xr, info, &mut slots);
+                let (chunks, _) = out.as_chunks_mut::<32>();
+                for (slot, o) in slots.iter().zip(chunks) {
+                    synth[ch].synth(slot, &mut slot_pcm);
+                    *o = slot_pcm;
+                }
+            }
+        }
+        Ok(self.frame.granules * 576)
     }
 }
 
@@ -276,8 +394,7 @@ fn decode_frame(
                     gi: &info,
                     layout: &layout,
                     scfsi: if shares { scfsi } else { 0 },
-                    intensity_right: header.channel_mode
-                        == vynamp_decode_mpa::ChannelMode::JointStereo
+                    intensity_right: header.channel_mode == ChannelMode::JointStereo
                         && header.mode_ext & 1 == 1
                         && ch == 1,
                 },

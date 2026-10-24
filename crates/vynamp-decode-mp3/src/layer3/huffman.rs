@@ -160,8 +160,6 @@ fn tables() -> &'static Tables {
 pub(crate) struct Spectrum {
     /// Lines up to the zero tail (`2 * big_values + 4 * count1 quadruples`).
     pub used_lines: usize,
-    /// Number of count1 quadruples decoded.
-    pub quads: usize,
 }
 
 /// First line of region 1 and of region 2.
@@ -172,10 +170,15 @@ pub(crate) struct Spectrum {
 /// region 1 runs to the end of the big values. Region 0 is then that many entries of the
 /// layout's width list, which for a short block are the three windows of the first three
 /// bands: 36 lines at every rate except 8 kHz (72), and for a start or stop block eight long
-/// bands. (A mixed block counts its entries the same way, which is 36 lines in MPEG-1 and 48 in
-/// MPEG-2; this is the behaviour of the `minimp3` tables that the widths come from.)
+/// bands. A mixed block's region 0 is the 36 long lines (72 at 8 kHz) in every version
+/// ([`Layout::mixed_region0`]): in MPEG-1 that is its eight long bands; in MPEG-2/2.5, where
+/// eight entries of the width list would reach 48 (64 at 8 kHz) as `minimp3` counts them, it
+/// follows FFmpeg, the oracle of this crate (see `docs/sources/mpeg-audio.md`).
 pub(crate) fn region_bounds(gi: &GranuleInfo, layout: &Layout) -> [usize; 2] {
     if gi.window_switching {
+        if gi.block_type == 2 && gi.mixed_block {
+            return [layout.mixed_region0, 576];
+        }
         return [layout.bound(usize::from(gi.region0_count) + 1), 576];
     }
     let r0 = usize::from(gi.region0_count) + 1;
@@ -250,7 +253,7 @@ pub(crate) fn decode_spectrum(
             return Err(bits.pos());
         };
         let entries = &t.pairs[id][..];
-        let linbits = u32::from(LINBITS[usize::from(table)]);
+        let linbits = book(table).map_or(0, |b| b.linbits);
         while line < stop {
             let Some((x, y)) = decode_pair(entries, linbits, bits) else {
                 return Err(bits.pos());
@@ -264,7 +267,6 @@ pub(crate) fn decode_spectrum(
         return Err(bits.pos());
     }
     let count1 = &t.count1[usize::from(gi.count1_table)];
-    let mut quads = 0;
     while line + 4 <= 576 && bits.pos() < end {
         let start = bits.pos();
         let e = count1[(bits.peek32() >> 26) as usize];
@@ -284,12 +286,8 @@ pub(crate) fn decode_spectrum(
         }
         xr[line..line + 4].copy_from_slice(&quad);
         line += 4;
-        quads += 1;
     }
-    Ok(Spectrum {
-        used_lines: line,
-        quads,
-    })
+    Ok(Spectrum { used_lines: line })
 }
 
 #[cfg(test)]

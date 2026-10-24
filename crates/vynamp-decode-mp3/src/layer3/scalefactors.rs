@@ -7,15 +7,29 @@ use super::tables::*;
 use vynamp_decode_mpa::MpegVersion;
 
 /// The scalefactor bands of a granule, in the order the lines are transmitted.
+///
+/// Block types 0, 1 and 3 use the 22 long bands. Block type 2 uses the 13 short bands, each
+/// sent as three entries (one per window); a mixed block sends the first `n_long` entries as
+/// long bands covering lines 0 to 35 (the two lowest subbands) and continues with the short
+/// bands from band 3 on.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Layout {
     /// Width in lines of each entry. Long bands first, then (short and mixed blocks) one entry
-    /// per band and window: window 0, 1, 2 of band `b` are entries `n_long + 3 * b + w`.
+    /// per band and window: window `w` of the `b`-th short entry group is entry
+    /// `n_long + 3 * b + w` (`b` counts from short band 3 in a mixed block).
     pub widths: &'static [u8],
-    /// Number of long band entries.
+    /// Number of long band entries. These always cover lines 0 to 35 in a mixed block: 8
+    /// entries in MPEG-1, 6 in MPEG-2/2.5, and 3 at 8 kHz, whose width list (from `minimp3`)
+    /// starts its short entries after three 12-line long bands.
     pub n_long: usize,
     /// Number of short band entries (a multiple of 3).
     pub n_short: usize,
+    /// Entries that carry a scalefactor (21 long, 36 short, 35 or 33 mixed); the rest (the
+    /// last band of each kind) have none and read as 0.
+    pub n_sf: usize,
+    /// Lines of region 0 of a mixed block (0 for other layouts): the 36 long lines, or 72 at
+    /// 8 kHz, for every version (see [`super::huffman::region_bounds`]).
+    pub mixed_region0: usize,
 }
 
 impl Layout {
@@ -27,17 +41,26 @@ impl Layout {
         if gi.window_switching && gi.block_type == 2 {
             if gi.mixed_block {
                 let widths = SFB_MIXED[row];
-                let n_long = if version == MpegVersion::V1 { 8 } else { 6 };
+                let v1 = version == MpegVersion::V1;
+                let n_long = match (v1, row) {
+                    (true, _) => 8,
+                    (false, 1) => 3,
+                    (false, _) => 6,
+                };
                 Self {
                     widths,
                     n_long,
                     n_short: widths.len() - n_long,
+                    n_sf: if v1 { 35 } else { 33 },
+                    mixed_region0: if row == 1 { 72 } else { 36 },
                 }
             } else {
                 Self {
                     widths: &SFB_SHORT[row],
                     n_long: 0,
                     n_short: SFB_SHORT[row].len(),
+                    n_sf: 36,
+                    mixed_region0: 0,
                 }
             }
         } else {
@@ -45,6 +68,8 @@ impl Layout {
                 widths: &SFB_LONG[row],
                 n_long: SFB_LONG[row].len(),
                 n_short: 0,
+                n_sf: 21,
+                mixed_region0: 0,
             }
         }
     }
@@ -75,7 +100,8 @@ pub(crate) struct Scalefactors {
     /// Raw values by layout entry (0 where none is transmitted).
     pub values: [u8; 40],
     /// Bit `i` set: entry `i` of an intensity right channel (MPEG-2/2.5) holds the all-ones
-    /// value of its width, which marks an illegal intensity position.
+    /// value of its width, which marks an illegal intensity position. A partition of width 0
+    /// (nothing is sent; `2^0 - 1 = 0` is its only value) is illegal throughout.
     pub illegal: u64,
     /// The `preflag` in effect.
     pub preflag: bool,
@@ -158,6 +184,12 @@ pub(crate) fn read(bits: &mut Bits, p: &Params, prev: &[u8; 40]) -> Scalefactors
                 if p.intensity_right && v == (1 << width) - 1 {
                     out.illegal |= 1 << (at + k);
                 }
+            }
+        } else if p.intensity_right {
+            // A partition of width 0 sends nothing: every position is 0 = 2^0 - 1 = `is_max`,
+            // which the standard (and its reference decoder) treats as illegal.
+            for k in at..end {
+                out.illegal |= 1 << k;
             }
         }
         at += usize::from(count);

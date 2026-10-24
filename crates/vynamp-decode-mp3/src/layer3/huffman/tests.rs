@@ -240,15 +240,26 @@ fn region_bounds_follow_the_band_tables() {
         let layout = Layout::new(sfb_row(v, r).unwrap(), v, &short);
         assert_eq!(region_bounds(&short, &layout), [want, 576], "{v:?} {r}");
     }
-    // Mixed blocks: eight entries, which are the eight long bands of MPEG-1.
+    // Mixed blocks: region 0 is the 36 long lines (the two lowest subbands) at every rate,
+    // 72 at 8 kHz: the eight long bands of MPEG-1, and in MPEG-2/2.5 the value FFmpeg uses
+    // rather than the 48 (64 at 8 kHz) that eight entries of the width list would give.
     let mixed = GranuleInfo {
         mixed_block: true,
         region0_count: 7,
         region1_count: 13,
         ..short
     };
-    let layout = Layout::new(5, MpegVersion::V1, &mixed);
-    assert_eq!(region_bounds(&mixed, &layout), [36, 576]);
+    for (v, r, want) in [
+        (MpegVersion::V1, 44100, 36),
+        (MpegVersion::V1, 32000, 36),
+        (MpegVersion::V2, 22050, 36),
+        (MpegVersion::V2, 16000, 36),
+        (MpegVersion::V25, 12000, 36),
+        (MpegVersion::V25, 8000, 72),
+    ] {
+        let layout = Layout::new(sfb_row(v, r).unwrap(), v, &mixed);
+        assert_eq!(region_bounds(&mixed, &layout), [want, 576], "{v:?} {r}");
+    }
 }
 
 #[test]
@@ -281,8 +292,7 @@ fn count1_tables_round_trip_every_quadruple() {
             ..GranuleInfo::default()
         };
         let (s, xr) = run(&w, &gi, &layout).unwrap();
-        assert_eq!(s.quads, 144);
-        assert_eq!(s.used_lines, 576);
+        assert_eq!(s.used_lines, 576); // 144 quadruples
         for (i, e) in expect.iter().enumerate() {
             assert_eq!(i32::from(xr[i]), *e, "line {i} table_b={table_b}");
         }
@@ -304,12 +314,12 @@ fn count1_follows_big_values_and_a_crossing_quadruple_is_stuffing() {
     };
     let (s, xr) = run(&w, &gi, &layout).unwrap();
     assert_eq!(&xr[..12], &[1, -1, 0, 1, 1, 0, -1, 1, 0, 0, 0, 0]);
-    assert_eq!((s.used_lines, s.quads), (12, 2));
+    assert_eq!(s.used_lines, 12); // two quadruples after four lines of pairs
     // Cut one bit off the last quadruple's code (a single 1 bit): it crosses the end.
     let mut cut = w.clone();
     cut.bits -= 1;
     let (s, _) = run(&cut, &gi, &layout).unwrap();
-    assert_eq!(s.quads, 1);
+    assert_eq!(s.used_lines, 8); // one quadruple
 }
 
 #[test]

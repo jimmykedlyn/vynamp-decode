@@ -2,11 +2,14 @@
 //!
 //! `MpegDecoder` decodes the packets of `vynamp-decode-mpa` (one whole frame per packet,
 //! header included) into planar `F32` audio scaled so that full scale is plus or minus 1.0.
-//! It dispatches on the track's codec: `Mp1` (Layer I) and `Mp2` (Layer II) are implemented;
-//! `Mp3` is reported as `Unsupported` by [`MpegDecoder::new`] until its layer lands.
+//! It dispatches on the track's codec: `Mp1` (Layer I), `Mp2` (Layer II) and `Mp3` (Layer III).
 //!
 //! The polyphase synthesis filterbank in the `synth` module is shared by all layers. Decoding
 //! allocates nothing per packet once the output buffer has grown to the frame size.
+//!
+//! Layer III reads its main data through a bit reservoir that spans frames. A granule whose
+//! data starts before the first frame the decoder has seen (the start of a stream, or a seek
+//! without enough preroll) decodes to silence.
 //!
 //! Errors carry the absolute source offset (`Packet::offset` plus the position inside the
 //! frame). In `Mode::Strict` a damaged frame (bad header, CRC mismatch, forbidden bit
@@ -19,8 +22,6 @@
 
 mod layer1;
 mod layer2;
-// Wired into `MpegDecoder` by the synthesis path; until then only the tests use it.
-#[allow(dead_code)]
 mod layer3;
 mod synth;
 mod tables;
@@ -31,6 +32,7 @@ mod common;
 #[cfg(test)]
 mod reference;
 
+use layer3::Layer3Decoder;
 use synth::Synthesis;
 use tables::MAX_SAMPLES;
 use vynamp_decode_core::{
@@ -49,6 +51,7 @@ pub struct MpegDecoder {
     mode: Mode,
     max_frames: u64,
     synth: [Synthesis; 2],
+    layer3: Option<Box<Layer3Decoder>>,
     pcm: Box<[[f32; MAX_SAMPLES]; 2]>,
     events: Vec<Event>,
 }
@@ -57,14 +60,13 @@ impl MpegDecoder {
     /// Creates a decoder for an `Mp1`, `Mp2` or `Mp3` track.
     ///
     /// # Errors
-    /// `Unsupported` for another codec and for Layer III (not implemented yet);
-    /// `Invalid` or `Limit` for a channel count or sample rate outside 1 or 2 channels and
-    /// `opts.limits`.
+    /// `Unsupported` for another codec; `Invalid` or `Limit` for a channel count or sample
+    /// rate outside 1 or 2 channels and `opts.limits`.
     pub fn new(track: &Track, opts: &Options) -> Result<Self> {
         let layer = match track.codec {
             CodecId::Mp1 => 1,
             CodecId::Mp2 => 2,
-            CodecId::Mp3 => return Err(Error::Unsupported("mpeg layer III decoding")),
+            CodecId::Mp3 => 3,
             _ => return Err(Error::Unsupported("not an mpeg audio track")),
         };
         opts.limits.check_channels(track.channels)?;
@@ -82,6 +84,7 @@ impl MpegDecoder {
             mode: opts.mode,
             max_frames: opts.limits.max_frames,
             synth: [Synthesis::new(), Synthesis::new()],
+            layer3: (layer == 3).then(|| Box::new(Layer3Decoder::new())),
             pcm: Box::new([[0.0; MAX_SAMPLES]; 2]),
             events: Vec::new(),
         })
@@ -102,6 +105,9 @@ impl MpegDecoder {
         }
         for s in &mut self.synth {
             s.reset();
+        }
+        if let Some(l3) = &mut self.layer3 {
+            l3.clear_overlap();
         }
         Ok(())
     }
@@ -127,7 +133,6 @@ impl MpegDecoder {
         {
             return Err(bad_header);
         }
-        // Layer III is rejected in `new`.
         let frames = if self.layer == 1 {
             layer1::decode_frame(
                 &packet.data,
@@ -137,6 +142,14 @@ impl MpegDecoder {
                 &mut self.pcm,
             )?;
             layer1::SAMPLES
+        } else if let Some(l3) = &mut self.layer3 {
+            l3.decode(
+                &packet.data,
+                &header,
+                packet.offset,
+                &mut self.synth,
+                &mut self.pcm,
+            )?
         } else {
             layer2::decode_frame(
                 &packet.data,
@@ -195,6 +208,9 @@ impl Decoder for MpegDecoder {
     fn reset(&mut self) {
         for s in &mut self.synth {
             s.reset();
+        }
+        if let Some(l3) = &mut self.layer3 {
+            l3.reset();
         }
     }
 

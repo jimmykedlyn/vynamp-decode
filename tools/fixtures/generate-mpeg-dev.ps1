@@ -70,3 +70,63 @@ foreach ($c in $l2cases) {
   if ($LASTEXITCODE -ne 0) { throw "ffmpeg decode failed for $name" }
 }
 Write-Host "wrote $($l2cases.Count) Layer II fixtures to $mp3out"
+
+# ---- Layer III decoder fixtures (crates/vynamp-decode-mp3/tests/fixtures) ----
+# Short encodes by libmp3lame of synthetic signals with tones, a gliding tone, noise and short
+# noise bursts (so that start, short and stop blocks occur), each with the reference decode of
+# the same file by FFmpeg's floating point decoder (`mp3float`) as raw interleaved
+# little-endian f32. The encodes carry NO Xing/Info/LAME tag (`-write_xing 0`) and the empty
+# ID3v2 header that FFmpeg's muxer writes is cut off, so the files start with the first frame.
+# With a LAME tag FFmpeg's demuxer asks the decoder to skip
+# the encoder delay plus 529+1 samples at the start (and the padding at the end), so the
+# reference would be trimmed. Without it FFmpeg drops nothing and its output starts with the
+# first sample of the first frame, the same alignment as the untrimmed output of the decoder
+# under test (offset 0, whole frames).
+#   rich: uncorrelated channels   corr: right = 0.9 * left (joint stereo picks MS)   mono
+$burst0 = '0.45*(random(2)*2-1)*lt(mod(t,0.06),0.003)'
+$burst1 = '0.45*(random(3)*2-1)*lt(mod(t+0.02,0.06),0.003)'
+$rich0 = "0.30*sin(2*PI*440*t)+0.15*sin(2*PI*(2000+3000*t)*t)+0.10*(random(0)*2-1)+$burst0"
+$rich1 = "0.25*sin(2*PI*660*t)+0.15*sin(2*PI*5300*t)*sin(2*PI*7*t)+0.10*(random(1)*2-1)+$burst1"
+$expr = @{
+  rich = "${rich0}|${rich1}"
+  corr = "0.3*sin(2*PI*440*t)+0.2*sin(2*PI*(1000+2500*t)*t)+0.08*(random(0)*2-1)+$burst0"
+  mono = $rich0
+}
+# name, rate, channels, kind, seconds, encoder args
+$l3cases = @(
+  @('l3-cbr128-44k-joint',  44100, 2, 'corr', 0.30, @('-b:a','128k')),
+  @('l3-cbr320-44k-lr',     44100, 2, 'rich', 0.30, @('-b:a','320k','-joint_stereo','0')),
+  @('l3-vbr-v0-44k',        44100, 2, 'rich', 0.30, @('-q:a','0')),
+  @('l3-vbr-v2-44k',        44100, 2, 'rich', 0.30, @('-q:a','2')),
+  @('l3-vbr-v5-44k',        44100, 2, 'rich', 0.30, @('-q:a','5')),
+  @('l3-lr-48k-128k',       48000, 2, 'rich', 0.30, @('-b:a','128k','-joint_stereo','0')),
+  @('l3-ms-48k-192k',       48000, 2, 'corr', 0.30, @('-b:a','192k')),
+  @('l3-cbr96-32k',         32000, 2, 'rich', 0.30, @('-b:a','96k')),
+  @('l3-mono-44k-64k',      44100, 1, 'mono', 0.30, @('-b:a','64k')),
+  @('l3-mpeg2-22k-64k',     22050, 2, 'rich', 0.50, @('-b:a','64k')),
+  @('l3-mpeg2-24k-48k',     24000, 2, 'corr', 0.50, @('-b:a','48k')),
+  @('l3-mpeg2-16k-32k',     16000, 2, 'rich', 0.50, @('-b:a','32k')),
+  @('l3-mpeg25-12k-mono',   12000, 1, 'mono', 0.70, @('-b:a','24k')),
+  @('l3-mpeg25-11k-stereo', 11025, 2, 'rich', 0.70, @('-b:a','32k')),
+  @('l3-mpeg25-8k-mono',     8000, 1, 'mono', 1.00, @('-b:a','16k'))
+)
+foreach ($c in $l3cases) {
+  $name, $rate, $ch, $kind, $secs, $enc = $c
+  $mp3 = Join-Path $mp3out "$name.mp3"
+  $ref = Join-Path $mp3out "$name.f32"
+  Remove-Item -Force -ErrorAction SilentlyContinue $mp3, $ref
+  # Commas inside the expression would end the filter option.
+  $e = $expr[$kind] -replace ',', '\,'
+  $af = @()
+  if ($kind -eq 'corr') { $af = @('-af', 'pan=stereo|c0=c0|c1=0.9*c0') }
+  & $FFmpeg -v error -y -f lavfi -i "aevalsrc=${e}:s=${rate}:d=${secs}" @af -fflags +bitexact -flags:a +bitexact -c:a libmp3lame @enc -write_xing 0 $mp3
+  if ($LASTEXITCODE -ne 0) { throw "ffmpeg encode failed for $name" }
+  $b = [IO.File]::ReadAllBytes($mp3)
+  if ($b[0] -eq 0x49 -and $b[1] -eq 0x44 -and $b[2] -eq 0x33) {
+    $n = 10 + (($b[6] -shl 21) -bor ($b[7] -shl 14) -bor ($b[8] -shl 7) -bor $b[9])
+    [IO.File]::WriteAllBytes($mp3, $b[$n..($b.Length - 1)])
+  }
+  & $FFmpeg -v error -y -c:a mp3float -i $mp3 -f f32le -c:a pcm_f32le $ref
+  if ($LASTEXITCODE -ne 0) { throw "ffmpeg decode failed for $name" }
+}
+Write-Host "wrote $($l3cases.Count) Layer III fixtures to $mp3out"

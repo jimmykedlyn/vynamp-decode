@@ -1,3 +1,5 @@
+mod synth;
+
 use super::huffman::book;
 use super::testenc::*;
 use super::*;
@@ -139,10 +141,6 @@ fn check(got: &Granule, spec: &GrSpec, scalefac: &[u8], what: &str) {
     );
 }
 
-fn sf_values(spec: &GrSpec) -> Vec<u8> {
-    spec.sf.iter().map(|s| s.0 as u8).collect()
-}
-
 #[test]
 fn mpeg1_stereo_frame_with_every_block_kind() {
     let mut seed = 0xC0FFEE;
@@ -261,11 +259,11 @@ fn mpeg2_mono_long_and_mixed_8khz() {
     assert!(out.gr[0][0].preflag);
 
     // 8 kHz mixed block (MPEG-2.5): compress 300 = slen (3, 3, 3, 0), partitions 6 9 9 9.
-    // Region 0 is eight entries of the width list 12 12 12 4 4 4 8 8 = 64 lines.
+    // Region 0 of a mixed block is 72 lines at 8 kHz (see `huffman::region_bounds`).
     let sf: Vec<u32> = (0..24).map(|i| (i * 3 + 1) % 8).collect();
     let g = granule(
         short_info(300, 70, [2, 5], true),
-        [64, 576],
+        [72, 576],
         sf_bits(&sf, &[3; 24]),
         8,
         &mut seed,
@@ -286,7 +284,7 @@ fn mpeg2_mono_long_and_mixed_8khz() {
     );
     assert_eq!(
         (out.gr[0][0].layout.n_long, out.gr[0][0].layout.n_short),
-        (6, 33)
+        (3, 36)
     );
 }
 
@@ -788,4 +786,81 @@ fn fixture_streams_decode_with_exactly_consumed_granules() {
     assert!(seen.short > 0, "no short blocks in the fixtures");
     assert!(seen.tables.count_ones() >= 10, "{:#b}", seen.tables);
     assert!(seen.linbits_tables != 0, "no escape table in the fixtures");
+}
+
+// ------------------------------------------------------------ synthesis fixtures coverage
+
+/// What the end-to-end fixtures (`tests/fixtures/l3-*.mp3`, compared with FFmpeg in
+/// `tests/mp3.rs`) exercise of the synthesis path.
+#[derive(Default, Debug)]
+struct Tools {
+    granules: usize,
+    long: usize,
+    start: usize,
+    short: usize,
+    stop: usize,
+    mixed: usize,
+    ms_frames: usize,
+    intensity_frames: usize,
+    scale_on: usize,
+    preflag: usize,
+    subblock_gain: usize,
+}
+
+#[test]
+fn the_end_to_end_fixtures_cover_every_block_type_and_middle_side() {
+    let dir = format!("{}/tests/fixtures", env!("CARGO_MANIFEST_DIR"));
+    let mut t = Tools::default();
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let path = entry.unwrap().path();
+        let name = path.file_name().unwrap().to_str().unwrap().to_owned();
+        if !(name.starts_with("l3-") && name.ends_with(".mp3")) {
+            continue;
+        }
+        let data = std::fs::read(&path).unwrap();
+        let mut st = Layer3::default();
+        let mut out = FrameData::new();
+        let mut at = 0usize;
+        while let Some(head) = data.get(at..at + 4) {
+            let h = parse_header(head.try_into().unwrap()).unwrap();
+            let frame = &data[at..(at + h.frame_len).min(data.len())];
+            decode_granules(&mut st, frame, &h, at as u64, &mut out).unwrap();
+            t.ms_frames += usize::from(
+                h.channel_mode == vynamp_decode_mpa::ChannelMode::JointStereo
+                    && h.mode_ext & 2 != 0,
+            );
+            t.intensity_frames += usize::from(
+                h.channel_mode == vynamp_decode_mpa::ChannelMode::JointStereo
+                    && h.mode_ext & 1 != 0,
+            );
+            for gr in 0..out.granules {
+                for ch in 0..out.channels {
+                    let g = &out.gr[gr][ch];
+                    if g.status != GranuleStatus::Decoded {
+                        continue;
+                    }
+                    t.granules += 1;
+                    match (g.info.block_type, g.info.mixed_block) {
+                        (0, _) => t.long += 1,
+                        (1, _) => t.start += 1,
+                        (2, false) => t.short += 1,
+                        (2, true) => t.mixed += 1,
+                        _ => t.stop += 1,
+                    }
+                    t.scale_on += usize::from(g.info.scalefac_scale);
+                    t.preflag += usize::from(g.preflag);
+                    t.subblock_gain += usize::from(g.info.subblock_gain != [0; 3]);
+                }
+            }
+            at += h.frame_len;
+        }
+    }
+    eprintln!("synthesis fixture coverage: {t:?}");
+    assert!(t.granules > 600, "{t:?}");
+    assert!(t.long > 200, "{t:?}");
+    assert!(t.start >= 5 && t.stop >= 5 && t.short >= 5, "{t:?}");
+    assert!(t.ms_frames >= 5, "{t:?}");
+    // LAME does not emit mixed blocks or intensity stereo; those are checked by hand-built
+    // frames (`tests/mp3.rs`, `stereo`, `imdct`).
+    assert_eq!((t.mixed, t.intensity_frames), (0, 0), "{t:?}");
 }
