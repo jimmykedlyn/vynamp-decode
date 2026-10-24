@@ -31,6 +31,12 @@ pub enum Event {
         /// Which checksum, e.g. `"flac md5"`.
         what: &'static str,
     },
+    /// The first frame of the stream did not start at sample zero and the timeline
+    /// was shifted so that it does (for example a stream cut out of a longer one).
+    TimelineRebased {
+        /// Sample number of the first frame in the original numbering.
+        origin: u64,
+    },
     /// Conflicting gapless information was found (reserved).
     GaplessConflict {
         /// Which sources of information conflict.

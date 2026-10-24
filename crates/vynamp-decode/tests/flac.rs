@@ -180,3 +180,29 @@ fn truncated_tail_is_an_error_in_strict_and_reported_in_resilient() {
         "{events:?}"
     );
 }
+
+#[test]
+fn a_stream_without_its_leading_frames_is_rebased_and_decodes_strictly() {
+    use vynamp_decode::Demuxer;
+    let plain = load("sine-16-stereo.flac");
+    let (want, end) = drain(&mut reader(plain.clone(), Mode::Strict));
+    end.unwrap();
+    let mut d =
+        vynamp_decode_flac::open_flac(Box::new(VecSource::new(plain.clone())), &Options::default())
+            .unwrap();
+    let mut p = vynamp_decode::Packet::default();
+    let mut starts = Vec::new();
+    while d.next_packet(&mut p).unwrap() {
+        starts.push((p.offset as usize, p.pts));
+    }
+    let (cut_at, origin) = starts[4];
+    let mut cut = plain[..audio_start(&plain)].to_vec();
+    cut.extend_from_slice(&plain[cut_at..]);
+    let mut r = reader(cut, Mode::Strict);
+    assert_eq!(r.frames(), Some(want[0].len() as u64 - origin));
+    let (got, end) = drain(&mut r);
+    end.unwrap();
+    assert_eq!(got[0][..], want[0][origin as usize..]);
+    assert_eq!(got[1][..], want[1][origin as usize..]);
+    assert_eq!(r.take_events(), vec![Event::TimelineRebased { origin }]);
+}

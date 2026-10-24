@@ -1364,7 +1364,7 @@ fn a_huge_gap_is_filled_in_bounded_work_and_reported_once() {
     let a = syn_frame(true, 0, 4096, &payload(1, 100));
     let b = syn_frame(true, 1 << 34, 4096, &payload(2, 100));
     let file = syn_stream(4096, 4096, 0, 0, &[a, b]);
-    let (probe, bytes, _) = Probe::new(file.clone());
+    let (probe, _, reads) = Probe::new(file);
     let mut d = open_flac(Box::new(probe), &resilient()).unwrap();
     let (got, r, ev) = read_all(&mut d);
     assert_eq!(r, Ok(()));
@@ -1386,7 +1386,7 @@ fn a_huge_gap_is_filled_in_bounded_work_and_reported_once() {
         }]
     );
     // The far frame is located once, not once per silence chunk.
-    assert!(bytes.load(Ordering::SeqCst) <= 2 * file.len() as u64);
+    assert!(reads.load(Ordering::SeqCst) <= 16);
 }
 
 #[test]
@@ -1407,4 +1407,60 @@ fn a_gap_within_the_cap_is_one_event_with_the_full_length() {
             frames: 2 * 4096,
         }]
     );
+}
+
+/// `file` without its first `skip` frames (metadata kept).
+fn without_leading_frames(file: &[u8], skip: usize) -> (Vec<u8>, Vec<Pkt>) {
+    let pk = clean(file);
+    let first = open(file.to_vec(), &strict()).first_frame_offset() as usize;
+    let mut out = file[..first].to_vec();
+    out.extend(&file[pk[skip].offset as usize..]);
+    (out, pk)
+}
+
+#[test]
+fn a_stream_cut_at_a_frame_boundary_is_rebased_to_sample_zero() {
+    let (file, pk) = without_leading_frames(&fixture("sine-16-stereo.flac"), 3);
+    let origin = pk[3].pts;
+    let total = pk.iter().map(|p| u64::from(p.frames)).sum::<u64>();
+    for opts in [strict(), resilient()] {
+        let mut d = open(file.clone(), &opts);
+        assert_eq!(d.tracks()[0].frames, Some(total - origin));
+        assert_eq!(d.tracks()[0].codec_private[18..34], [0u8; 16]);
+        let (got, r, ev) = read_all(&mut d);
+        assert_eq!(r, Ok(()));
+        assert_eq!(ev, vec![Event::TimelineRebased { origin }]);
+        assert_eq!(got.len(), pk.len() - 3);
+        for (g, w) in got.iter().zip(&pk[3..]) {
+            assert_eq!(
+                (g.pts, g.frames, &g.data),
+                (w.pts - origin, w.frames, &w.data)
+            );
+        }
+    }
+}
+
+#[test]
+fn seeking_works_in_the_rebased_timeline() {
+    let (file, pk) = without_leading_frames(&fixture("sine-16-stereo.flac"), 3);
+    let origin = pk[3].pts;
+    let total = pk.iter().map(|p| u64::from(p.frames)).sum::<u64>() - origin;
+    let mut d = open(file, &strict());
+    for t in [0, 1, total / 2, total - 1, 5, total / 3] {
+        let got = d.seek(0, t).unwrap();
+        let p = pk[3..]
+            .iter()
+            .find(|p| p.pts - origin <= t && t < p.pts - origin + u64::from(p.frames))
+            .unwrap();
+        assert_eq!(
+            got,
+            SeekTo {
+                frame: p.pts - origin,
+                preroll: t - (p.pts - origin)
+            }
+        );
+        let mut out = Packet::default();
+        assert!(d.next_packet(&mut out).unwrap());
+        assert_eq!(out.pts, got.frame);
+    }
 }

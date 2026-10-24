@@ -72,6 +72,9 @@ pub struct FlacDemuxer {
     blocking: Option<bool>,
     /// Pre-2007 variable block size layout: "fixed" headers carry sample numbers.
     legacy_vbr: bool,
+    /// Sample number of the stream's first frame in the original numbering; every
+    /// timeline position the demuxer reports is relative to it.
+    origin: u64,
     /// The `Clamped` event for samples beyond STREAMINFO's total was already queued.
     clamped: bool,
     /// Where Resilient mode started skipping unparseable bytes.
@@ -175,9 +178,14 @@ impl FlacDemuxer {
         };
         let rest = &rest[..rest.len().min(MAX_HEADER)];
         let blocking = self.blocking;
+        let origin = self.origin;
         Ok(parse_frame_header_with(rest, &self.info, self.legacy_vbr)
             .ok()
-            .filter(|h| blocking.is_none_or(|b| b == h.blocking_variable)))
+            .filter(|h| blocking.is_none_or(|b| b == h.blocking_variable))
+            .and_then(|mut h| {
+                h.first_sample = h.first_sample.checked_sub(origin)?;
+                Some(h)
+            }))
     }
 
     /// Moves `head` to the next 0xFF byte at or after it; `false` at the end of data.
@@ -547,6 +555,43 @@ impl FlacDemuxer {
 }
 
 impl FlacDemuxer {
+    /// Rebases the timeline of a stream whose first frame does not start at sample 0.
+    ///
+    /// Such a stream is a cut-out of a longer one (leading frames removed, metadata kept).
+    /// When the first bytes after the metadata are a valid frame with a nonzero first
+    /// sample, that sample becomes the origin: positions are reported relative to it, the
+    /// track length becomes the declared total minus the origin, and `Event::TimelineRebased`
+    /// is queued. The stream is no longer complete, so the track's STREAMINFO copy has its
+    /// MD5 zeroed (disabling verification) and the seek table, whose entries describe the
+    /// original file, is dropped.
+    fn detect_origin(&mut self) -> Result<()> {
+        let first = self.first_frame;
+        self.reposition(first)?;
+        let origin = match self.header_at(0)? {
+            Some(h) if h.first_sample > 0 => {
+                let loc = self.locate(&h)?;
+                loc.crc_ok.then_some(h.first_sample)
+            }
+            _ => None,
+        };
+        self.blocking = None;
+        self.reposition(first)?;
+        let Some(origin) = origin else {
+            return Ok(());
+        };
+        self.origin = origin;
+        self.seek_points.clear();
+        let total = self.info.total_samples;
+        self.info.total_samples = total.saturating_sub(origin);
+        let track = &mut self.tracks[0];
+        track.frames = (self.info.total_samples != 0).then_some(self.info.total_samples);
+        if let Some(md5) = track.codec_private.get_mut(18..34) {
+            md5.fill(0);
+        }
+        self.event(Event::TimelineRebased { origin });
+        Ok(())
+    }
+
     /// Recognises the pre-2007 variable block size layout.
     ///
     /// RFC 9639 appendix B.1: before July 2007 variable block size streams were not
@@ -703,6 +748,7 @@ pub fn open_flac(mut src: Box<dyn Source>, opts: &Options) -> Result<FlacDemuxer
         audio_end,
         blocking: None,
         legacy_vbr: false,
+        origin: 0,
         clamped: false,
         skipped: None,
         fill_left: 0,
@@ -710,6 +756,7 @@ pub fn open_flac(mut src: Box<dyn Source>, opts: &Options) -> Result<FlacDemuxer
         events: Vec::new(),
     };
     d.detect_legacy_vbr()?;
+    d.detect_origin()?;
     Ok(d)
 }
 
