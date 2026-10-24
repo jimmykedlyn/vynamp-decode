@@ -288,10 +288,14 @@ impl FlacDemuxer {
     fn locate(&mut self, h: &FrameHeader) -> Result<Located> {
         let start = self.head;
         let hard = self.info.max_frame == 0;
-        // STREAMINFO's maximum frame size is a hint (encoders get it wrong): allow twice
-        // that, and at least 64 KiB, up to the hard cap.
+        // STREAMINFO's maximum frame size is a hint for Resilient mode (encoders get it
+        // wrong): allow twice that, and at least 64 KiB, up to the hard cap. Strict mode
+        // holds the stream to its declaration (the conformance corpus has a faulty file
+        // with a wrong maximum).
         let cap = if hard {
             HARD_CAP
+        } else if self.strict() {
+            self.info.max_frame as usize
         } else {
             (self.info.max_frame as usize)
                 .saturating_mul(2)

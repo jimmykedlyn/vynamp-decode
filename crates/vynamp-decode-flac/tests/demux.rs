@@ -1672,20 +1672,23 @@ fn demuxer_events_beyond_the_queue_capacity_are_counted() {
 }
 
 #[test]
-fn the_streaminfo_maximum_frame_size_is_only_a_hint() {
-    // Frame 1 is three times the declared maximum but valid: Strict accepts it.
+fn the_streaminfo_maximum_frame_size_is_only_a_hint_in_resilient_mode() {
+    // Frame 1 is three times the declared maximum but valid.
     let frames = vec![
         syn_frame(false, 0, 4096, &payload(1, 100)),
         syn_frame(false, 1, 4096, &payload(2, 900)),
         syn_frame(false, 2, 4096, &payload(3, 100)),
     ];
     let file = syn_stream(4096, 4096, 300, 3 * 4096, &frames);
-    for opts in [strict(), resilient()] {
-        let mut d = open(file.clone(), &opts);
-        let (got, r, ev) = read_all(&mut d);
-        assert_eq!(r, Ok(()));
-        assert!(ev.is_empty(), "{ev:?}");
-        assert_eq!(got.len(), 3);
-        assert_eq!(got[1].data, frames[1]);
-    }
+    let mut d = open(file.clone(), &resilient());
+    let (got, r, ev) = read_all(&mut d);
+    assert_eq!(r, Ok(()));
+    assert!(ev.is_empty(), "{ev:?}");
+    assert_eq!(got.len(), 3);
+    assert_eq!(got[1].data, frames[1]);
+    // Strict holds the stream to its declaration.
+    let mut d = open(file, &strict());
+    let (got, r, _) = read_all(&mut d);
+    assert_eq!(got.len(), 1);
+    assert_eq!(invalid(&r).0, "flac frame crc");
 }
