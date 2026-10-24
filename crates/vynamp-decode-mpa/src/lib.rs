@@ -10,12 +10,15 @@
 //!
 //! `next_packet` yields one packet per frame with `pts = frame index * samples per frame`;
 //! `data` is the whole frame including its header. In `Mode::Strict` a lost sync or a
-//! truncated last frame is an error; in `Mode::Resilient` the lost span becomes silence
+//! truncated last frame is an error (bytes after the last frame that hold no further
+//! frame end the stream, as in FLAC; a Xing/VBRI frame count larger than the frames found is
+//! `Invalid { what: "mpeg frame count" }`); in `Mode::Resilient` the lost span becomes silence
 //! packets (empty `data`, at most eight per gap) and one `Event::CorruptFrame`.
 //!
-//! `seek` is exact and returns a start before the target: two frames earlier for Layer III
-//! (the bit reservoir reaches back at most 511 bytes, which is at most two frames at the
-//! lowest bitrates) and one frame earlier for Layers I and II (the synthesis filterbank
+//! `seek` is exact and returns a start before the target. For Layer III the start is computed:
+//! the goal frame's `main_data_begin` says how many bytes of earlier main data it needs, the
+//! frames before it are added until their main data covers that, and one more frame is added
+//! for the IMDCT overlap (at most 32 frames). For Layers I and II it is one frame earlier (the synthesis filterbank
 //! needs a frame to warm up). `SeekTo::preroll` is the number of samples to discard after
 //! decoding from there.
 #![warn(missing_docs)]

@@ -27,6 +27,8 @@ $cases = @(
   @('mpeg25-8k-mono.mp3',    @('-c:a','libmp3lame','-b:a','16k','-ar','8000','-ac','1')),
   @('cbr64-44k-mono.mp3',    @('-c:a','libmp3lame','-b:a','64k','-ar','44100','-ac','1')),
   @('nolame-cbr128-48k.mp3', @('-c:a','libmp3lame','-b:a','128k','-write_xing','0')),
+  @('cbr32-48k-stereo.mp3',  @('-c:a','libmp3lame','-b:a','32k')),
+  @('cbr8-8k-mono.mp3',      @('-c:a','libmp3lame','-b:a','8k','-ar','8000','-ac','1')),
   @('mp2-192k-48k-stereo.mp2', @('-c:a','mp2','-b:a','192k')),
   @('mp2-128k-44k-stereo.mp2', @('-c:a','mp2','-b:a','128k','-ar','44100'))
 )

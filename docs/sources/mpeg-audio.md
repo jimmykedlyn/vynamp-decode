@@ -40,9 +40,13 @@ dev-time tool: it writes the fixtures (`tools/fixtures/generate-mpeg-dev.ps1`) a
 - VBRI (Fraunhofer): `VBRI` at offset 36 of the first frame, version, delay, quality, bytes,
   frames, table entry count, scale, entry size, frames per entry, table. The delay field is
   ignored.
-- Seek preroll: the Layer III bit reservoir holds at most 511 bytes (the 9-bit
-  `main_data_begin` of MPEG-1; 255 in MPEG-2), which spans at most two earlier frames at the
-  lowest bitrates, hence two frames of preroll; Layers I and II have no reservoir and one frame
-  warms the synthesis filterbank up. The decoder task checks the figures against its output.
+- Seek preroll: a Layer III frame starts its main data `main_data_begin` bytes (9 bits in
+  MPEG-1, 8 in MPEG-2/2.5, at most 511 bytes) before its own, inside the main data of earlier
+  frames. The demuxer reads `main_data_begin` of the goal frame and steps back over earlier
+  frames, adding up their main data (frame length minus header, CRC and side information),
+  until it covers that; one more frame is added for the IMDCT overlap and the total is capped at
+  32 frames. Layers I and II have no reservoir; one frame warms the synthesis filterbank up. The
+  decoder task checks the figures against its output.
+- Gapless is exact only if the LAME padding is at least 529; a smaller one saturates to 0.
 - ID3v2, ID3v1, APEv2 and Lyrics3v2 tags are handled by the core `skip_id3v2` and
   `find_trailers`.

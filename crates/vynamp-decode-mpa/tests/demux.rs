@@ -10,7 +10,7 @@ use vynamp_decode_core::{
     CancelSource, CodecId, Demuxer, Error, Event, GaplessKind, LimitKind, Limits, Mode, Options,
     Packet, SeekTo, VecSource,
 };
-use vynamp_decode_mpa::{MpaDemuxer, VbrKind, open_mpa, parse_header};
+use vynamp_decode_mpa::{MpaDemuxer, MpegVersion, VbrKind, open_mpa, parse_header};
 
 // ---------------------------------------------------------------- helpers
 
@@ -165,6 +165,15 @@ fn fixtures() -> Vec<Fx> {
             Some(132_300),
         ),
         f("nolame-cbr128-48k.mp3", CodecId::Mp3, 48000, 2, 126, None),
+        f(
+            "cbr32-48k-stereo.mp3",
+            CodecId::Mp3,
+            48000,
+            2,
+            126,
+            Some(144_000),
+        ),
+        f("cbr8-8k-mono.mp3", CodecId::Mp3, 8000, 1, 44, Some(24_000)),
         f("mp2-192k-48k-stereo.mp2", CodecId::Mp2, 48000, 2, 125, None),
         f("mp2-128k-44k-stereo.mp2", CodecId::Mp2, 44100, 2, 115, None),
     ]
@@ -516,7 +525,6 @@ fn check_seeks(name: &str, data: &[u8], opts: &Options) {
         .unwrap()
         .layer
         == 3;
-    let preroll = if layer3 { 2 } else { 1 };
     let mut targets: Vec<u64> = (0..n).step_by(10).map(|i| i * spf + i % 7).collect();
     targets.push((n - 1) * spf);
     targets.push(n * spf - 1);
@@ -529,7 +537,12 @@ fn check_seeks(name: &str, data: &[u8], opts: &Options) {
     }
     for t in order {
         let idx = t / spf;
-        let start = idx.saturating_sub(preroll);
+        let start = idx
+            - if layer3 {
+                reservoir_preroll(&pkts, idx)
+            } else {
+                1.min(idx)
+            };
         let to = d.seek(0, t).unwrap();
         assert_eq!(
             to,
@@ -643,23 +656,6 @@ fn strict_truncated_last_frame_is_unexpected_eof() {
     let (got, r, _) = read_all(&mut d);
     assert_eq!(got.len(), pkts.len() - 1);
     assert_eq!(invalid(&r), ("unexpected eof", last.offset));
-    // A cut inside the next header is a truncation too.
-    let cut = plain[..last.offset as usize + 2].to_vec();
-    let mut d = open(cut, &strict());
-    let (_, r, _) = read_all(&mut d);
-    assert_eq!(invalid(&r), ("unexpected eof", last.offset));
-}
-
-#[test]
-fn strict_trailing_garbage_is_lost_sync() {
-    let plain = fixture("cbr128-48k-stereo.mp3");
-    let n = clean(&plain).len();
-    let mut data = plain.clone();
-    data.extend([0xAA; 1000]);
-    let mut d = open(data, &strict());
-    let (got, r, _) = read_all(&mut d);
-    assert_eq!(got.len(), n);
-    assert_eq!(invalid(&r), ("mpeg sync", plain.len() as u64));
 }
 
 #[test]
@@ -926,4 +922,241 @@ fn the_cbr_index_is_used_only_when_the_info_header_agrees_with_the_audio() {
     let mut lying = plain;
     lying[at + 8..at + 12].copy_from_slice(&90u32.to_be_bytes());
     assert!(!open(lying, &strict()).uses_cbr_index());
+}
+
+// ---------------------------------------------------------------- reservoir-aware preroll
+
+fn main_data_begin(p: &Pkt) -> usize {
+    let h = parse_header(p.data[..4].try_into().unwrap()).unwrap();
+    let o = 4 + if h.crc { 2 } else { 0 };
+    match h.version {
+        MpegVersion::V1 => usize::from(p.data[o]) << 1 | usize::from(p.data[o + 1] >> 7),
+        _ => usize::from(p.data[o]),
+    }
+}
+
+fn main_data_len(p: &Pkt) -> usize {
+    let h = parse_header(p.data[..4].try_into().unwrap()).unwrap();
+    p.data.len() - 4 - if h.crc { 2 } else { 0 } - h.side_info_len()
+}
+
+/// Frames before `goal` a Layer III decode must start with: enough earlier main data to cover
+/// `main_data_begin`, plus one frame for the IMDCT overlap, at most 32.
+fn reservoir_preroll(pkts: &[Pkt], goal: u64) -> u64 {
+    let goal = goal as usize;
+    let need = main_data_begin(&pkts[goal]);
+    let (mut k, mut have) = (0usize, 0usize);
+    while have < need && k < 31 && k < goal {
+        k += 1;
+        have += main_data_len(&pkts[goal - k]);
+    }
+    (k + 1).min(goal) as u64
+}
+
+#[test]
+fn low_bitrate_seeks_start_early_enough_to_cover_the_reservoir() {
+    let mut deeper_than_two = 0;
+    for name in ["cbr32-48k-stereo.mp3", "cbr8-8k-mono.mp3"] {
+        let data = fixture(name);
+        let pkts = clean(&data);
+        let spf = u64::from(pkts[0].frames);
+        let mut d = open(data, &strict());
+        for goal in 0..pkts.len() as u64 {
+            let t = goal * spf + 3;
+            let to = d.seek(0, t).unwrap();
+            let start = to.frame / spf;
+            assert_eq!(to.frame + to.preroll, t, "{name} goal {goal}");
+            assert_eq!(
+                goal - start,
+                reservoir_preroll(&pkts, goal),
+                "{name} {goal}"
+            );
+            // The main data of the frames from `start` up to the goal covers what the goal
+            // frame needs (or the stream starts there).
+            let have: usize = pkts[start as usize..goal as usize]
+                .iter()
+                .map(main_data_len)
+                .sum();
+            assert!(
+                start == 0 || have >= main_data_begin(&pkts[goal as usize]),
+                "{name} goal {goal}: have {have}, need {}",
+                main_data_begin(&pkts[goal as usize])
+            );
+            if goal - start > 2 {
+                deeper_than_two += 1;
+            }
+            let mut p = Packet::default();
+            assert!(d.next_packet(&mut p).unwrap());
+            assert_eq!(p.pts, to.frame);
+        }
+    }
+    assert!(
+        deeper_than_two > 0,
+        "no low-bitrate target needed more than two frames"
+    );
+}
+
+// ---------------------------------------------------------------- frame chaining
+
+fn set_bitrate_index(data: &mut [u8], off: u64, idx: u8) {
+    let b = &mut data[off as usize + 2];
+    *b = (*b & 0x0F) | idx << 4;
+}
+
+#[test]
+fn a_header_that_changes_the_frame_length_is_caught_at_that_frame() {
+    // Bitrate index 9 (128 kbps) -> 10 (160 kbps) or 4 (56 kbps); padding bit flipped on a
+    // 44.1 kHz file.
+    type Damage = fn(&mut [u8], u64);
+    let cases: [(&str, Damage); 3] = [
+        ("cbr128-48k-stereo.mp3", |d, o| set_bitrate_index(d, o, 10)),
+        ("cbr128-48k-stereo.mp3", |d, o| set_bitrate_index(d, o, 4)),
+        ("cbr128-44k-stereo.mp3", |d, o| d[o as usize + 2] ^= 0x02),
+    ];
+    for (name, damage) in cases {
+        let plain = fixture(name);
+        let pkts = clean(&plain);
+        let k = 40;
+        let mut damaged = plain;
+        damage(&mut damaged, pkts[k].offset);
+        let mut d = open(damaged.clone(), &strict());
+        let (got, r, _) = read_all(&mut d);
+        assert_eq!(got.len(), k, "{name}: the damaged frame is not delivered");
+        assert_eq!(invalid(&r), ("mpeg sync", pkts[k].offset), "{name}");
+
+        let mut d = open(damaged, &resilient());
+        let (got, r, ev) = read_all(&mut d);
+        assert_eq!(r, Ok(()));
+        assert_eq!(got.len(), pkts.len(), "{name}");
+        for (i, (a, b)) in got.iter().zip(&pkts).enumerate() {
+            if i == k {
+                assert!(a.data.is_empty());
+                assert_eq!((a.pts, a.frames, a.offset), (b.pts, b.frames, b.offset));
+            } else {
+                assert_eq!(a, b, "{name} packet {i}");
+            }
+        }
+        assert_eq!(
+            ev,
+            vec![Event::CorruptFrame {
+                pts: k as u64 * 1152,
+                offset: pkts[k].offset,
+                frames: 1152
+            }],
+            "{name}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------- trailing junk and counts
+
+#[test]
+fn strict_ignores_junk_after_the_last_frame() {
+    let plain = fixture("cbr128-48k-stereo.mp3");
+    let n = clean(&plain).len();
+    let mut rng = Rng(99);
+    let random: Vec<u8> = (0..3000).map(|_| rng.next() as u8).collect();
+    let junk: Vec<Vec<u8>> = vec![
+        vec![0x00],
+        vec![0xFF, 0xFB],
+        vec![0xFF, 0xFB, 0x94],
+        vec![0u8; 4096],
+        vec![0xAA; 1000],
+        random,
+    ];
+    for j in junk {
+        let mut data = plain.clone();
+        data.extend(&j);
+        let mut d = open(data.clone(), &strict());
+        let (got, r, ev) = read_all(&mut d);
+        assert_eq!((r, got.len()), (Ok(()), n), "junk of {} bytes", j.len());
+        assert!(ev.is_empty());
+        // Seeks to and past the end do not fail either.
+        check_seeks("junk", &data, &strict());
+    }
+}
+
+#[test]
+fn resilient_reports_junk_after_the_last_frame_once() {
+    let plain = fixture("cbr128-48k-stereo.mp3");
+    let n = clean(&plain).len();
+    for len in [1usize, 3, 4096] {
+        let mut data = plain.clone();
+        data.extend(vec![0u8; len]);
+        let mut d = open(data, &resilient());
+        let (got, r, ev) = read_all(&mut d);
+        assert_eq!((r, got.len()), (Ok(()), n));
+        assert_eq!(
+            ev,
+            vec![Event::CorruptFrame {
+                pts: n as u64 * 1152,
+                offset: plain.len() as u64,
+                frames: 0
+            }]
+        );
+    }
+}
+
+#[test]
+fn a_stream_shorter_than_its_declared_frame_count() {
+    let plain = fixture("cbr128-48k-stereo.mp3");
+    let pkts = clean(&plain);
+    // Cut at a frame boundary: the Info header still says 126 frames.
+    let cut = plain[..pkts[100].offset as usize].to_vec();
+    let mut d = open(cut.clone(), &strict());
+    let (got, r, _) = read_all(&mut d);
+    assert_eq!(got.len(), 100);
+    assert_eq!(invalid(&r), ("mpeg frame count", cut.len() as u64));
+    let mut d = open(cut.clone(), &resilient());
+    let (got, r, ev) = read_all(&mut d);
+    assert_eq!((r, got.len()), (Ok(()), 100));
+    assert_eq!(
+        ev,
+        vec![Event::Clamped {
+            what: "mpeg frame count",
+            declared: 126,
+            actual: 100
+        }]
+    );
+    // A cut inside the next header leaves stray bytes: the count catches it.
+    let last = pkts.last().unwrap();
+    let stray = plain[..last.offset as usize + 2].to_vec();
+    let mut d = open(stray, &strict());
+    let (got, r, _) = read_all(&mut d);
+    assert_eq!(got.len(), pkts.len() - 1);
+    assert_eq!(invalid(&r).0, "mpeg frame count");
+    // Seeking in such a file does not fail.
+    let mut d = open(cut, &strict());
+    assert_eq!(d.seek(0, u64::MAX).unwrap().preroll, 0);
+}
+
+// ---------------------------------------------------------------- checkpoints
+
+#[test]
+fn resilient_seek_counts_a_gap_like_reading_does() {
+    // The gap starts exactly at a checkpoint (frame 64) of a VBR file, whose frames differ in
+    // length: the lost frames are estimated from the frame before the gap, not from whatever
+    // was read last.
+    let plain = fixture("vbr-q2-48k-stereo.mp3");
+    let pkts = clean(&plain);
+    let mut damaged = plain;
+    let (from, to) = (pkts[64].offset as usize, pkts[74].offset as usize);
+    damaged[from..to].fill(0);
+    let mut d = open(damaged, &resilient());
+    let (seq, r, _) = read_all(&mut d);
+    assert_eq!(r, Ok(()));
+    for goal in [100u64, 110, 120] {
+        let to = d.seek(0, goal * 1152).unwrap();
+        let mut p = Packet::default();
+        assert!(d.next_packet(&mut p).unwrap());
+        let want = seq
+            .iter()
+            .find(|s| s.pts == to.frame)
+            .expect("landing frame");
+        assert_eq!(
+            (p.pts, p.offset, &p.data),
+            (want.pts, want.offset, &want.data)
+        );
+        assert_eq!(to.frame + to.preroll, goal * 1152);
+    }
 }

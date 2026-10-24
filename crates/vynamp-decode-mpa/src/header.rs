@@ -54,7 +54,9 @@ pub struct FrameHeader {
     pub channel_mode: ChannelMode,
     /// Raw two-bit mode extension field.
     pub mode_ext: u8,
-    /// Raw two-bit emphasis field. The reserved value 2 is kept, not rejected.
+    /// Raw two-bit emphasis field. The reserved value 2 is kept, not
+    /// rejected: real files carry it, and the chain check of the demuxer (a header must be
+    /// followed by another) already limits false syncs.
     pub emphasis: u8,
     /// Frame length in bytes including the header, or 0 for free format (the length
     /// is then a property of the stream, see [`FrameHeader::slot_size`]).
