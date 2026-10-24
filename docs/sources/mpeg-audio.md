@@ -197,3 +197,10 @@ and two interpretation details were taken from the public-domain (CC0) `minimp3`
 - **Different block layouts in the two channels.** Intensity is skipped and full-range
   middle/side is applied; FFmpeg uses the right channel's layout instead. Only streams with
   encoder errors reach this.
+- **8 kHz mixed blocks: four long subbands.** Superseding the fix-round remark above that the
+  IMDCT and alias reduction keep two long subbands: the 72 long lines are four subbands, so at
+  8 kHz the long IMDCT/window covers subbands 0-3 and alias reduction runs across boundaries
+  1-3 (FFmpeg's MPEG-2.5 switch_point behaviour, per the controller ruling); every other rate
+  keeps two subbands and boundary 1. Both counts come from `Layout::long_subbands()` (long
+  lines / 18); test `long_regions_agree_for_every_sample_rate` and the 8 kHz f64 reference
+  chain test.

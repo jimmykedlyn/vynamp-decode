@@ -126,11 +126,12 @@ impl Reference {
         &mut self,
         xr: &[f32; 576],
         info: &GranuleInfo,
+        long_sb: usize,
     ) -> [[f64; 32]; 18] {
         let mut slots = [[0.0; 32]; 18];
         for sb in 0..32 {
             let x: [f64; 18] = std::array::from_fn(|i| f64::from(xr[18 * sb + i]));
-            let short = info.block_type == 2 && !(info.mixed_block && sb < 2);
+            let short = sb >= long_sb;
             let bt = if info.block_type == 2 {
                 0
             } else {
@@ -190,25 +191,29 @@ fn overlap_add_and_frequency_inversion_follow_the_definition_across_block_types(
     let mut ov = Overlap::new();
     let mut reference = Reference::new();
     // Long, start, short, short, stop, long, mixed short, stop, long.
+    // The last field is the number of long subbands: 32, 0 (short), 2 (mixed) or 4 (mixed at
+    // 8 kHz).
     let kinds = [
-        (0, false),
-        (1, false),
-        (2, false),
-        (2, false),
-        (3, false),
-        (0, false),
-        (2, true),
-        (3, false),
-        (0, false),
+        (0, false, 32),
+        (1, false, 32),
+        (2, false, 0),
+        (2, false, 0),
+        (3, false, 32),
+        (0, false, 32),
+        (2, true, 2),
+        (3, false, 32),
+        (2, true, 4),
+        (3, false, 32),
+        (0, false, 32),
     ];
-    for (n, &(bt, mixed)) in kinds.iter().enumerate() {
+    for (n, &(bt, mixed, long_sb)) in kinds.iter().enumerate() {
         let xr = spectrum(&mut rng, 576);
         let gi = info(bt, mixed);
         let mut slots = [[0.0f32; 32]; 18];
-        ov.granule(&xr, &gi, &mut slots);
+        ov.granule(&xr, &gi, long_sb, &mut slots);
         compare(
             &slots,
-            &reference.granule(&xr, &gi),
+            &reference.granule(&xr, &gi, long_sb),
             &format!("granule {n}"),
         );
     }
@@ -223,10 +228,10 @@ fn silent_subbands_are_skipped_but_the_overlap_still_drains() {
         let xr = spectrum(&mut rng, used);
         let gi = info(0, false);
         let mut slots = [[0.0f32; 32]; 18];
-        ov.granule(&xr, &gi, &mut slots);
+        ov.granule(&xr, &gi, 32, &mut slots);
         compare(
             &slots,
-            &reference.granule(&xr, &gi),
+            &reference.granule(&xr, &gi, 32),
             &format!("granule {n}"),
         );
     }
@@ -237,9 +242,9 @@ fn clear_forgets_the_overlap() {
     let mut rng = Rng(55);
     let mut ov = Overlap::new();
     let mut slots = [[0.0f32; 32]; 18];
-    ov.granule(&spectrum(&mut rng, 576), &info(0, false), &mut slots);
+    ov.granule(&spectrum(&mut rng, 576), &info(0, false), 32, &mut slots);
     ov.clear();
-    ov.granule(&[0.0; 576], &info(0, false), &mut slots);
+    ov.granule(&[0.0; 576], &info(0, false), 32, &mut slots);
     assert!(slots.iter().flatten().all(|&v| v == 0.0));
 }
 
@@ -266,7 +271,7 @@ fn a_stationary_sine_reconstructs_through_the_overlap() {
             *v = (s / 9.0) as f32;
         }
         let mut slots = [[0.0f32; 32]; 18];
-        ov.granule(&xr, &info(0, false), &mut slots);
+        ov.granule(&xr, &info(0, false), 32, &mut slots);
         out.extend(slots.iter().map(|s| f64::from(s[0])));
     }
     // Granule g outputs samples 18 g to 18 g + 17 once block g - 1 has contributed.

@@ -104,13 +104,20 @@ fn reference_pcm(frame: &[u8]) -> Vec<Vec<f64>> {
                     f0 += w;
                 }
             }
-            let aliased = match (g.info.block_type, g.info.mixed_block) {
-                (2, false) => xs.map(f64::from).to_vec(),
-                (2, true) => alias::tests::reference(&xs, 1),
-                _ => alias::tests::reference(&xs, 31),
+            // Long subbands: all, none (short), two (mixed) or four (mixed at 8 kHz, whose
+            // 72 long lines are four subbands).
+            let long_sb = match (g.info.block_type, g.info.mixed_block) {
+                (2, false) => 0,
+                (2, true) if g.layout.bound(g.layout.n_long) == 72 => 4,
+                (2, true) => 2,
+                _ => 32,
+            };
+            let aliased = match long_sb {
+                0 => xs.map(f64::from).to_vec(),
+                n => alias::tests::reference(&xs, n.min(32) - 1),
             };
             let xs: [f32; 576] = std::array::from_fn(|i| aliased[i] as f32);
-            for slot in overlap[ch].granule(&xs, &g.info) {
+            for slot in overlap[ch].granule(&xs, &g.info, long_sb) {
                 pcm[ch].extend(filter[ch].slot(&slot));
             }
         }
@@ -422,4 +429,23 @@ fn a_joint_stereo_granule_with_one_undecodable_channel_is_silent_in_both() {
         // Granule 1 is complete again.
         assert!(joint[0][576..].iter().any(|&v| v != 0.0));
     }
+}
+
+#[test]
+fn an_8khz_mixed_frame_synthesizes_like_the_definition() {
+    // MPEG-2.5 8 kHz mono, mixed block: six 12-line long bands (72 lines), then short bands.
+    // compress 300 = slen (3, 3, 3, 0), partitions 6 9 9 9.
+    let mut seed = 808;
+    let sf: Vec<u32> = (0..24).map(|i| (i * 3 + 1) % 8).collect();
+    let g = granule(
+        loud(short_info(300, 60, [13, 15], true)),
+        [72, 576],
+        sf_bits(&sf, &[3; 24]),
+        10,
+        &mut seed,
+    );
+    let mut specs = vec![vec![g]];
+    let (si, w) = assemble(&mut specs, [0, 0], 0);
+    let frame = frame_bytes(&v25_mono(), &si, &w.bytes);
+    assert_same_audio(&frame, "8 kHz mixed");
 }

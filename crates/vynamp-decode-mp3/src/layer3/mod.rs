@@ -266,10 +266,9 @@ impl Layer3Decoder {
                 if info.block_type == 2 {
                     requant::reorder(xr, &granules[ch].layout);
                 }
-                if info.block_type != 2 || info.mixed_block {
-                    alias::reduce(xr, used[ch], info.block_type == 2);
-                }
-                self.overlap[ch].granule(xr, info, &mut slots);
+                let long_sb = granules[ch].layout.long_subbands();
+                alias::reduce(xr, used[ch], long_sb.saturating_sub(1));
+                self.overlap[ch].granule(xr, info, long_sb, &mut slots);
                 let (chunks, _) = out.as_chunks_mut::<32>();
                 for (slot, o) in slots.iter().zip(chunks) {
                     synth[ch].synth(slot, &mut slot_pcm);

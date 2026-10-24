@@ -74,6 +74,17 @@ impl Layout {
         }
     }
 
+    /// Subbands (of 18 lines) processed as long blocks by the alias reduction and the IMDCT:
+    /// all 32 for long blocks, none for short blocks, and for a mixed block the subbands that
+    /// the long bands cover (two; four at 8 kHz).
+    pub(crate) fn long_subbands(&self) -> usize {
+        if self.n_short == 0 {
+            32
+        } else {
+            self.bound(self.n_long) / 18
+        }
+    }
+
     /// Line index where the first `entries` entries end (576 for all of them or more).
     pub(crate) fn bound(&self, entries: usize) -> usize {
         self.widths

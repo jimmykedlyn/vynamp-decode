@@ -193,24 +193,22 @@ impl Overlap {
 
     /// Turns the 576 lines of a granule into 18 time slots of 32 subband samples. For short
     /// blocks `xr` must already be reordered (`xr[18 sb + 3 i + w]`: line `i` of window `w` of
-    /// subband `sb`). A subband whose 18 lines are all zero costs no transform: its output is
+    /// subband `sb`); `long_sb` is [`Layout::long_subbands`](super::Layout::long_subbands). A subband whose 18 lines are all zero costs no transform: its output is
     /// just the previous granule's tail.
     pub(super) fn granule(
         &mut self,
         xr: &[f32; 576],
         info: &GranuleInfo,
+        long_sb: usize,
         slots: &mut [[f32; 32]; 18],
     ) {
-        let short = info.block_type == 2;
-        // Long subbands: all of them, or the two lowest of a mixed block.
-        let long_sb = if !short {
-            32
-        } else if info.mixed_block {
-            2
-        } else {
+        // Subbands below `long_sb` use the long transform: all of them for a long block,
+        // none for a short one, the lowest few for a mixed one (window type 0 there).
+        let block_type = if info.block_type == 2 {
             0
+        } else {
+            info.block_type
         };
-        let block_type = if short { 0 } else { info.block_type };
         let mut out = [0.0f32; 36];
         for sb in 0..32 {
             let lines: &[f32; 18] = xr[18 * sb..18 * sb + 18]

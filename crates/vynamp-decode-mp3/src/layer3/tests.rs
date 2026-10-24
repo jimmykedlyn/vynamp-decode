@@ -864,3 +864,46 @@ fn the_end_to_end_fixtures_cover_every_block_type_and_middle_side() {
     // frames (`tests/mp3.rs`, `stereo`, `imdct`).
     assert_eq!((t.mixed, t.intensity_frames), (0, 0), "{t:?}");
 }
+
+#[test]
+fn long_regions_agree_for_every_sample_rate() {
+    // The lines requantized as long bands, the subbands with the long IMDCT and the alias
+    // boundaries cover the same region: two subbands at every rate, four at 8 kHz.
+    use scalefactors::Layout;
+    use vynamp_decode_mpa::MpegVersion::{V1, V2, V25};
+    for (v, rate) in [
+        (V1, 44100),
+        (V1, 48000),
+        (V1, 32000),
+        (V2, 22050),
+        (V2, 24000),
+        (V2, 16000),
+        (V25, 11025),
+        (V25, 12000),
+        (V25, 8000),
+    ] {
+        let row = tables::sfb_row(v, rate).unwrap();
+        let mixed = GranuleInfo {
+            window_switching: true,
+            block_type: 2,
+            mixed_block: true,
+            ..GranuleInfo::default()
+        };
+        let l = Layout::new(row, v, &mixed);
+        let want = if rate == 8000 { 4 } else { 2 };
+        assert_eq!(l.bound(l.n_long), 18 * want, "{v:?} {rate}: long lines");
+        assert_eq!(l.long_subbands(), want, "{v:?} {rate}: long subbands");
+        assert_eq!(l.mixed_region0, 18 * want, "{v:?} {rate}: region 0");
+        let long = Layout::new(row, v, &GranuleInfo::default());
+        assert_eq!(long.long_subbands(), 32);
+        let short = Layout::new(
+            row,
+            v,
+            &GranuleInfo {
+                mixed_block: false,
+                ..mixed
+            },
+        );
+        assert_eq!(short.long_subbands(), 0);
+    }
+}

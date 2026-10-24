@@ -4,7 +4,7 @@
 //! every subband boundary (lines `18 sb - 1 - i` and `18 sb + i`, `i` in 0 to 7):
 //! `a' = a cs_i - b ca_i`, `b' = b cs_i + a ca_i` with `cs = 1 / sqrt(1 + c^2)`,
 //! `ca = c / sqrt(1 + c^2)` and the eight coefficients `c` of the standard. Short blocks have
-//! none; a mixed block only across the boundary between its two long subbands.
+//! none; a mixed block only across the boundaries between its long subbands (the first one; the first three at 8 kHz, where the long bands cover four subbands).
 
 use std::sync::OnceLock;
 
@@ -30,11 +30,12 @@ pub(super) fn warm_up() {
 
 /// Applies the butterflies between neighbouring subbands to `xr` (lines in subband order).
 /// Lines from `used` on are zero, so boundaries whose butterflies lie wholly beyond them are
-/// skipped. `mixed`: only the boundary between subbands 0 and 1.
-pub(super) fn reduce(xr: &mut [f32; 576], used: usize, mixed: bool) {
+/// skipped. Boundaries `1..=boundaries` are processed: 31 for a long block, one fewer than the
+/// long subbands for a mixed block (1, or 3 at 8 kHz).
+pub(super) fn reduce(xr: &mut [f32; 576], used: usize, boundaries: usize) {
     let coef = coefficients();
     // Boundary `sb` touches lines 18 sb - 8 to 18 sb + 7.
-    let last = ((used.min(576) + 7) / 18).min(if mixed { 1 } else { 31 });
+    let last = ((used.min(576) + 7) / 18).min(boundaries.min(31));
     for sb in 1..=last {
         let b = 18 * sb;
         for (i, &(cs, ca)) in coef.iter().enumerate() {
