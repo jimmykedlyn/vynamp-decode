@@ -10,13 +10,17 @@
 //! frame by a silence packet (empty `data`, `frames` from the header), fills
 //! missing samples between valid headers the same way, and reports each case
 //! with `Event::CorruptFrame`.
+//!
+//! Trailers after the audio (ID3v1, APEv2, Lyrics3v2, an ID3v2 tag with footer) are
+//! recognised and excluded. Other bytes after the last frame are ignored: the final
+//! frame ends at the shortest prefix that passes its CRC-16 (Resilient mode reports them).
 
 use crate::frame::{FrameHeader, MAX_HEADER, parse_frame_header_with};
 use crate::metadata::read_metadata;
 use crate::{RawBlock, SeekPoint, StreamInfo};
 use vynamp_decode_core::{
     ByteReader, CodecId, Demuxer, Error, Event, GaplessKind, LimitKind, Mode, Options, Packet,
-    Result, SeekTo, Source, Track, crc16, skip_id3v2,
+    Result, SeekTo, Source, Track, crc16, crc16_update, skip_id3v2,
 };
 
 /// Read size while streaming frames.
@@ -34,6 +38,8 @@ const MAX_EVENTS: usize = 4096;
 /// Silence per gap is capped at this many maximum-size blocks; beyond that the
 /// timeline jumps.
 const GAP_FILL_BLOCKS: u64 = 8;
+/// Trailers recognised after the audio, at most.
+const MAX_TRAILERS: usize = 16;
 /// Length of an ID3v1 tag at the end of a file.
 const ID3V1_LEN: usize = 128;
 
@@ -223,7 +229,7 @@ impl FlacDemuxer {
             return Ok(true);
         }
         let loc = self.locate(h)?;
-        Ok(loc.crc_ok && self.eof && loc.end == self.buf.len())
+        Ok(loc.crc_ok && self.eof && (loc.end == self.buf.len() || loc.junk_after))
     }
 
     /// Finds the frame header at `head`. Garbage is an error in Strict mode and
@@ -280,13 +286,11 @@ impl FlacDemuxer {
         } else {
             self.info.max_frame as usize
         };
+        let strict = self.strict();
         let too_long = |first: Option<usize>| match first {
-            Some(end) => Ok(Located { end, crc_ok: false }),
-            None if hard => Err(Error::Limit(LimitKind::Bytes)),
-            None => Ok(Located {
-                end: start + h.header_len,
-                crc_ok: false,
-            }),
+            Some(end) => Ok(Located::new(end, false)),
+            None if hard && strict => Err(Error::Limit(LimitKind::Bytes)),
+            None => Ok(Located::new(start + h.header_len, false)),
         };
         let mut first: Option<usize> = None;
         let mut tried = 0;
@@ -314,10 +318,7 @@ impl FlacDemuxer {
             }
             if self.header_at(j)?.is_some() {
                 if self.crc_ok(start, j) {
-                    return Ok(Located {
-                        end: j,
-                        crc_ok: true,
-                    });
+                    return Ok(Located::new(j, true));
                 }
                 first.get_or_insert(j);
                 tried += 1;
@@ -330,20 +331,72 @@ impl FlacDemuxer {
         // No further header: the frame runs to the end of the data (before any trailer).
         let len = self.buf.len();
         if self.crc_ok(start, len) {
+            return Ok(Located::new(len, true));
+        }
+        // Unrecognised bytes may follow the last frame: it ends at the shortest
+        // prefix that holds its CRC-16.
+        // A header-like boundary that failed its CRC-16 means more frames follow instead.
+        if first.is_none()
+            && let Some(end) = self.last_frame_end(start, h)?
+        {
             return Ok(Located {
-                end: len,
+                end,
                 crc_ok: true,
+                junk_after: true,
             });
         }
-        Ok(Located {
-            end: first.unwrap_or(len),
-            crc_ok: false,
-        })
+        Ok(Located::new(first.unwrap_or(len), false))
+    }
+
+    /// End of the final frame starting at `start` when junk follows it: the shortest
+    /// prefix, at least as long as the smallest possible frame, whose last two bytes
+    /// are the CRC-16 of the rest.
+    fn last_frame_end(&mut self, start: usize, h: &FrameHeader) -> Result<Option<usize>> {
+        // Every subframe has a header byte and, at the least, one sample's worth of bits.
+        let bits = usize::from(self.info.channels) * (8 + usize::from(h.bits_per_sample));
+        let min = h.header_len + bits.div_ceil(8) + 2;
+        let len = self.buf.len();
+        if start + min > len {
+            return Ok(None);
+        }
+        let mut crc = crc16_update(0, &self.buf[start..start + min - 2]);
+        for end in start + min..=len {
+            if end % 4096 == 0 {
+                self.opts.cancel.check()?;
+            }
+            // `crc` covers `buf[start..end - 2]`.
+            if crc.to_be_bytes() == self.buf[end - 2..end] {
+                return Ok(Some(end));
+            }
+            if end < len {
+                crc = crc16_update(crc, &self.buf[end - 2..end - 1]);
+            }
+        }
+        Ok(None)
     }
 
     fn consume_to(&mut self, end: usize) {
         self.head = end;
         self.last_end = self.abs(end);
+    }
+
+    /// Consumes a located frame. Junk after the final frame ends the audio data there
+    /// (Resilient mode reports the ignored bytes). `pts` is the sample after the frame.
+    fn consume_frame(&mut self, loc: &Located, pts: u64) {
+        self.consume_to(loc.end);
+        if loc.junk_after {
+            let at = self.abs(loc.end);
+            self.audio_end = at;
+            self.buf.truncate(loc.end);
+            self.eof = true;
+            if !self.strict() {
+                self.event(Event::CorruptFrame {
+                    pts,
+                    offset: at,
+                    frames: 0,
+                });
+            }
+        }
     }
 
     /// End of data: a stream that stops before its declared length is an error in Strict mode.
@@ -547,7 +600,7 @@ impl FlacDemuxer {
                 if loc.crc_ok {
                     self.blocking.get_or_insert(h.blocking_variable);
                 }
-                self.consume_to(loc.end);
+                self.consume_frame(&loc, end_pts);
                 self.next_pts = end_pts;
             }
         }
@@ -647,48 +700,130 @@ struct Located {
     end: usize,
     /// The frame passes its CRC-16.
     crc_ok: bool,
+    /// Unrecognised bytes follow the frame up to the end of the data: the frame is
+    /// the last one and `end` is where its own CRC-16 holds.
+    junk_after: bool,
 }
 
-/// Absolute position where an APEv2 and/or ID3v1 trailer starts (`u64::MAX` = none).
+impl Located {
+    fn new(end: usize, crc_ok: bool) -> Self {
+        Self {
+            end,
+            crc_ok,
+            junk_after: false,
+        }
+    }
+}
+
+/// Absolute position where the trailers after the audio start (`u64::MAX` = none).
+///
+/// Recognised, in any order and number: ID3v1, APEv2 (footer, optional header), an
+/// ID3v2 tag appended with a footer (`3DI`) and Lyrics3v2.
 fn find_trailer(src: &mut dyn Source, first_frame: u64) -> Result<u64> {
     let Some(len) = src.len() else {
         return Ok(u64::MAX);
     };
-    let read_at = |src: &mut dyn Source, pos: u64, n: usize| -> Result<Option<Vec<u8>>> {
-        if pos < first_frame || pos + n as u64 > len {
+    let mut tail = Tail {
+        src,
+        first_frame,
+        len,
+    };
+    let mut end = len;
+    // Each pass strips one trailer; stop when none is recognised.
+    for _ in 0..MAX_TRAILERS {
+        let Some(size) = trailer_size(&mut tail, end)? else {
+            break;
+        };
+        end -= size;
+    }
+    Ok(if end < len { end } else { u64::MAX })
+}
+
+/// Random access to the end of a source.
+struct Tail<'a> {
+    src: &'a mut dyn Source,
+    first_frame: u64,
+    len: u64,
+}
+
+impl Tail<'_> {
+    /// Reads `n` bytes at `pos`, or `None` outside the audio data.
+    fn read_at(&mut self, pos: u64, n: usize) -> Result<Option<Vec<u8>>> {
+        if pos < self.first_frame || pos + n as u64 > self.len {
             return Ok(None);
         }
-        src.seek(pos)?;
+        self.src.seek(pos)?;
         let mut v = vec![0u8; n];
         let mut got = 0;
         while got < n {
-            match src.read(&mut v[got..])? {
+            match self.src.read(&mut v[got..])? {
                 0 => return Ok(None),
                 k => got += k,
             }
         }
         Ok(Some(v))
-    };
-    let mut end = len;
-    if len >= ID3V1_LEN as u64
-        && let Some(tag) = read_at(src, len - ID3V1_LEN as u64, 3)?
+    }
+}
+
+/// Size of the trailer that ends at `end`, if one is recognised.
+fn trailer_size(tail: &mut Tail, end: u64) -> Result<Option<u64>> {
+    let room = end.saturating_sub(tail.first_frame);
+    // ID3v1: 128 bytes starting with "TAG".
+    if end >= ID3V1_LEN as u64
+        && let Some(tag) = tail.read_at(end - ID3V1_LEN as u64, 3)?
         && &tag[..] == b"TAG"
     {
-        end = len - ID3V1_LEN as u64;
+        return Ok(Some(ID3V1_LEN as u64));
     }
+    // APEv2: a 32-byte footer, preceded by the items and followed by nothing.
     if end >= 32
-        && let Some(f) = read_at(src, end - 32, 32)?
+        && let Some(f) = tail.read_at(end - 32, 32)?
         && f.starts_with(b"APETAGEX")
     {
         let le = |i: usize| u32::from_le_bytes([f[i], f[i + 1], f[i + 2], f[i + 3]]);
         let (version, size, flags) = (le(8), u64::from(le(12)), le(20));
         // The size covers the items and the footer but not an optional header.
         let total = size + if flags & 0x8000_0000 != 0 { 32 } else { 0 };
-        if (version == 1000 || version == 2000) && size >= 32 && total <= end - first_frame {
-            end -= total;
+        if (version == 1000 || version == 2000) && size >= 32 && total <= room {
+            return Ok(Some(total));
         }
     }
-    Ok(if end < len { end } else { u64::MAX })
+    // Lyrics3v2: "LYRICSBEGIN" ... a six-digit size ... "LYRICS200". The size counts
+    // everything between the two markers' ends, so the tag is the size plus 15 bytes.
+    if end >= 15
+        && let Some(f) = tail.read_at(end - 15, 15)?
+        && &f[6..] == b"LYRICS200"
+        && f[..6].iter().all(u8::is_ascii_digit)
+    {
+        let size = f[..6]
+            .iter()
+            .fold(0u64, |a, &d| a * 10 + u64::from(d - b'0'));
+        let total = size + 15;
+        if size >= 11
+            && total <= room
+            && let Some(begin) = tail.read_at(end - total, 11)?
+            && &begin[..] == b"LYRICSBEGIN"
+        {
+            return Ok(Some(total));
+        }
+    }
+    // ID3v2 appended with a footer: "3DI", version, flags, synchsafe size. The size
+    // excludes the 10-byte header and the 10-byte footer.
+    if end >= 10
+        && let Some(f) = tail.read_at(end - 10, 10)?
+        && &f[..3] == b"3DI"
+        && f[6..].iter().all(|&b| b < 0x80)
+    {
+        let size = f[6..].iter().fold(0u64, |a, &b| a << 7 | u64::from(b));
+        let total = size + 20;
+        if total <= room
+            && let Some(head) = tail.read_at(end - total, 3)?
+            && &head[..] == b"ID3"
+        {
+            return Ok(Some(total));
+        }
+    }
+    Ok(None)
 }
 
 /// Opens a FLAC stream, parsing its metadata blocks.
@@ -824,7 +959,8 @@ impl Demuxer for FlacDemuxer {
                     return Ok(true);
                 }
                 // The frame lies before the current position: drop it.
-                self.consume_to(loc.end);
+                let next = self.next_pts;
+                self.consume_frame(&loc, next);
                 self.event(Event::CorruptFrame {
                     pts: h.first_sample,
                     offset,
@@ -865,7 +1001,8 @@ impl Demuxer for FlacDemuxer {
             }
             let loc = self.locate(&h)?;
             // RFC 9639 section 4.1: only the last block may be shorter than 16 samples.
-            if h.block_size < 16 && self.strict() && !(self.eof && loc.end == self.buf.len()) {
+            let last = self.eof && (loc.end == self.buf.len() || loc.junk_after);
+            if h.block_size < 16 && self.strict() && !last {
                 return Err(Error::Invalid {
                     what: "flac block size",
                     offset,
@@ -898,7 +1035,7 @@ impl Demuxer for FlacDemuxer {
                 out.data.clear();
                 out.data.extend_from_slice(&self.buf[start..loc.end]);
             }
-            self.consume_to(loc.end);
+            self.consume_frame(&loc, end_pts);
             self.next_pts = end_pts;
             return Ok(true);
         }

@@ -21,7 +21,7 @@ pub use bits::BitReader;
 pub use buffer::AudioBuffer;
 pub use bytes::ByteReader;
 pub use cancel::{CancelSource, CancelToken};
-pub use crc::{crc8, crc16};
+pub use crc::{crc8, crc16, crc16_update};
 pub use error::{Error, LimitKind, Result};
 pub use event::Event;
 pub use limits::{Limits, Mode, Options};

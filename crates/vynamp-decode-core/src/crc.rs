@@ -61,7 +61,17 @@ pub fn crc8(data: &[u8]) -> u8 {
 /// assert_eq!(vynamp_decode_core::crc16(b"123456789"), 0xFEE8);
 /// ```
 pub fn crc16(data: &[u8]) -> u16 {
-    data.iter().fold(0u16, |crc, &b| {
+    crc16_update(0, data)
+}
+
+/// Continues a CRC-16 over more data: `crc16_update(crc16(a), b) == crc16(a ++ b)`.
+///
+/// ```
+/// use vynamp_decode_core::{crc16, crc16_update};
+/// assert_eq!(crc16_update(crc16(b"1234"), b"56789"), crc16(b"123456789"));
+/// ```
+pub fn crc16_update(crc: u16, data: &[u8]) -> u16 {
+    data.iter().fold(crc, |crc, &b| {
         (crc << 8) ^ TABLE16[usize::from((crc >> 8) as u8 ^ b)]
     })
 }

@@ -1024,22 +1024,6 @@ fn id3v1_trailer_is_ignored() {
 }
 
 #[test]
-fn junk_with_unknown_total_is_an_error_in_strict_only() {
-    let mut file = syn_stream(4096, 4096, 0, 0, &fixed_frames(3, 0));
-    let junk_at = file.len() as u64;
-    file.extend(vec![0x11u8; 40]);
-    // The junk follows the last frame directly, so the CRC-16 of that frame cannot hold.
-    let mut s = open(file.clone(), &strict());
-    let (_, r, _) = read_all(&mut s);
-    assert!(matches!(r, Err(Error::Invalid { .. })));
-    let mut z = open(file, &resilient());
-    let (got, r, _) = read_all(&mut z);
-    assert_eq!(r, Ok(()));
-    assert!(got.len() >= 2);
-    assert!(junk_at > 0);
-}
-
-#[test]
 fn frame_larger_than_the_streaminfo_maximum_is_corrupt() {
     let frames = vec![
         syn_frame(false, 0, 4096, &payload(1, 100)),
@@ -1069,11 +1053,24 @@ fn unterminated_frame_hits_the_hard_cap() {
     hdr.push(crc8(&hdr));
     file.extend(hdr);
     file.resize(file.len() + (17 << 20), 0);
-    for opts in [strict(), resilient()] {
-        let mut d = open(file.clone(), &opts);
-        let mut p = Packet::default();
-        assert_eq!(d.next_packet(&mut p), Err(Error::Limit(LimitKind::Bytes)));
-    }
+    let mut d = open(file.clone(), &strict());
+    let mut p = Packet::default();
+    assert_eq!(d.next_packet(&mut p), Err(Error::Limit(LimitKind::Bytes)));
+    // Resilient treats the unterminated frame as a corrupt last frame.
+    let mut d = open(file, &resilient());
+    let (got, r, ev) = read_all(&mut d);
+    assert_eq!(r, Ok(()));
+    assert_eq!(got.len(), 1);
+    assert!(got[0].data.is_empty());
+    assert_eq!((got[0].pts, got[0].frames), (0, 4096));
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::CorruptFrame {
+            pts: 0,
+            frames: 4096,
+            ..
+        }
+    )));
 }
 
 #[test]
@@ -1462,5 +1459,129 @@ fn seeking_works_in_the_rebased_timeline() {
         let mut out = Packet::default();
         assert!(d.next_packet(&mut out).unwrap());
         assert_eq!(out.pts, got.frame);
+    }
+}
+
+// ------------------------------------------------------------ trailers
+
+fn synchsafe(n: u32) -> [u8; 4] {
+    [
+        ((n >> 21) & 0x7F) as u8,
+        ((n >> 14) & 0x7F) as u8,
+        ((n >> 7) & 0x7F) as u8,
+        (n & 0x7F) as u8,
+    ]
+}
+
+/// An ID3v2.4 tag with a footer, as appended after the audio.
+fn id3v2_with_footer(body_len: usize) -> Vec<u8> {
+    let mut t = b"ID3\x04\x00\x10".to_vec();
+    t.extend(synchsafe(body_len as u32));
+    t.extend(vec![0xFFu8; body_len]);
+    t.extend(b"3DI\x04\x00\x10");
+    t.extend(synchsafe(body_len as u32));
+    t
+}
+
+fn lyrics3v2(body_len: usize) -> Vec<u8> {
+    let mut t = b"LYRICSBEGIN".to_vec();
+    t.extend(vec![0xFFu8; body_len]);
+    t.extend(format!("{:06}", 11 + body_len).bytes());
+    t.extend(b"LYRICS200");
+    t
+}
+
+fn id3v1() -> Vec<u8> {
+    let mut tag = b"TAG".to_vec();
+    tag.resize(128, b' ');
+    tag
+}
+
+fn assert_all_frames(file: Vec<u8>, n: usize) {
+    for opts in [strict(), resilient()] {
+        let mut d = open(file.clone(), &opts);
+        let (got, r, ev) = read_all(&mut d);
+        assert_eq!(r, Ok(()));
+        assert!(ev.is_empty(), "{ev:?}");
+        assert_eq!(got.len(), n);
+    }
+}
+
+#[test]
+fn id3v2_footer_trailer_is_ignored() {
+    let mut file = syn_stream(4096, 4096, 0, 0, &fixed_frames(4, 0));
+    file.extend(id3v2_with_footer(300));
+    assert_all_frames(file, 4);
+}
+
+#[test]
+fn lyrics3v2_with_id3v1_is_ignored() {
+    let mut file = syn_stream(4096, 4096, 0, 0, &fixed_frames(4, 0));
+    file.extend(lyrics3v2(200));
+    file.extend(id3v1());
+    assert_all_frames(file, 4);
+}
+
+#[test]
+fn trailers_combine_in_any_order() {
+    let base = syn_stream(4096, 4096, 0, 0, &fixed_frames(3, 0));
+    let ape = ape_footer(2, true);
+    let orders: [Vec<Vec<u8>>; 4] = [
+        vec![ape.clone(), id3v2_with_footer(40), id3v1()],
+        vec![id3v2_with_footer(40), ape.clone(), id3v1()],
+        vec![lyrics3v2(30), ape, id3v1()],
+        vec![id3v1(), id3v2_with_footer(5)],
+    ];
+    for parts in orders {
+        let mut file = base.clone();
+        for p in parts {
+            file.extend(p);
+        }
+        assert_all_frames(file, 3);
+    }
+}
+
+#[test]
+fn unrecognised_junk_after_the_last_frame_is_ignored() {
+    let mut x = 0x1234_5678_9ABC_DEF1u64;
+    let junk: Vec<u8> = (0..1024)
+        .map(|_| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            (x >> 32) as u8
+        })
+        .collect();
+    let mut file = syn_stream(4096, 4096, 0, 0, &fixed_frames(4, 0));
+    file.extend(&junk);
+    let mut d = open(file.clone(), &strict());
+    let (got, r, ev) = read_all(&mut d);
+    assert_eq!(r, Ok(()));
+    assert!(ev.is_empty(), "{ev:?}");
+    assert_eq!(got.len(), 4);
+    assert_eq!(got[3].data, fixed_frames(4, 0)[3]);
+    // Resilient reports the ignored bytes, once, without losing samples.
+    let mut d = open(file, &resilient());
+    let (got, r, ev) = read_all(&mut d);
+    assert_eq!(r, Ok(()));
+    assert_eq!(got.len(), 4);
+    assert_eq!(ev.len(), 1);
+    assert!(matches!(ev[0], Event::CorruptFrame { frames: 0, .. }));
+}
+
+#[test]
+fn a_short_final_frame_may_be_followed_by_trailers_and_junk() {
+    for total in [0, 3 * 4096 + 5] {
+        let frames = fixed_frames(3, 5);
+        let base = syn_stream(4096, 4096, 0, total, &frames);
+        let mut tagged = base.clone();
+        tagged.extend(id3v1());
+        assert_all_frames(tagged, 4);
+        let mut junk = base;
+        junk.extend(vec![0x11u8; 700]);
+        let mut d = open(junk, &strict());
+        let (got, r, _) = read_all(&mut d);
+        assert_eq!(r, Ok(()));
+        assert_eq!(got.len(), 4);
     }
 }
