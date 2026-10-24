@@ -11,14 +11,17 @@
 //! `next_packet` yields one packet per frame with `pts = frame index * samples per frame`;
 //! `data` is the whole frame including its header. In `Mode::Strict` a lost sync or a
 //! truncated last frame is an error (bytes after the last frame that hold no further
-//! frame end the stream, as in FLAC; a Xing/VBRI frame count larger than the frames found is
+//! frame end the stream, as in FLAC; a Xing/VBRI frame count that is neither the number of frames found
+//! nor that number plus one (some encoders count the header frame) is
 //! `Invalid { what: "mpeg frame count" }`); in `Mode::Resilient` the lost span becomes silence
 //! packets (empty `data`, at most eight per gap) and one `Event::CorruptFrame`.
 //!
 //! `seek` is exact and returns a start before the target. For Layer III the start is computed:
-//! the goal frame's `main_data_begin` says how many bytes of earlier main data it needs, the
-//! frames before it are added until their main data covers that, and one more frame is added
-//! for the IMDCT overlap (at most 32 frames). For Layers I and II it is one frame earlier (the synthesis filterbank
+//! the `main_data_begin` of the goal frame and of the two frames before it (the overlap of the
+//! inverse MDCT and the filterbank history of the goal's first granule) say how many bytes of earlier
+//! main data they need; the start is the earliest frame whose successors' main data covers all three
+//! (at most 32 frames back), so that the output from the goal on is identical to a decode from the
+//! start of the stream. For Layers I and II it is one frame earlier (the synthesis filterbank
 //! needs a frame to warm up). `SeekTo::preroll` is the number of samples to discard after
 //! decoding from there.
 #![warn(missing_docs)]
@@ -38,8 +41,9 @@ const PROBE_SCAN: usize = 4096;
 ///
 /// Looks for a valid frame header and follows the chain of frame lengths: three consistent
 /// consecutive frames (same version, layer and sample rate) give 90, two give 60, one gives
-/// 30. A lone header found away from the start, with room for its successor, gives 0: random
-/// data contains such headers by chance.
+/// 30. A lone header found away from the start, with room for its successor, or a free-format
+/// header (which has no length to follow) found there, gives 0: random data contains such headers
+/// by chance.
 pub fn probe_mpa(header: &[u8]) -> u8 {
     let mut best = 0u8;
     for start in 0..header.len().min(PROBE_SCAN) {
@@ -77,7 +81,7 @@ pub fn probe_mpa(header: &[u8]) -> u8 {
             }
         }
         let score = match count {
-            1 if start > 0 && room => 0,
+            1 if start > 0 && (room || first.frame_len == 0) => 0,
             1 => 30,
             2 => 60,
             _ => 90,

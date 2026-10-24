@@ -518,7 +518,12 @@ fn free_format_streams_are_measured() {
 // ---------------------------------------------------------------- seek
 
 fn check_seeks(name: &str, data: &[u8], opts: &Options) {
-    let pkts = clean(data);
+    // The packets as Resilient mode delivers them: a header that lies about the frame count\n    // is reported there but does not change them.
+    let pkts = {
+        let (p, r, _) = read_all(&mut open(data.to_vec(), &resilient()));
+        assert_eq!(r, Ok(()));
+        p
+    };
     let n = pkts.len() as u64;
     let spf = u64::from(pkts[0].frames);
     let layer3 = parse_header(pkts[0].data[..4].try_into().unwrap())
@@ -940,17 +945,28 @@ fn main_data_len(p: &Pkt) -> usize {
     p.data.len() - 4 - if h.crc { 2 } else { 0 } - h.side_info_len()
 }
 
-/// Frames before `goal` a Layer III decode must start with: enough earlier main data to cover
-/// `main_data_begin`, plus one frame for the IMDCT overlap, at most 32.
+/// Frames back from `f` until their main data covers `main_data_begin` of frame `f`.
+fn frames_to_cover(pkts: &[Pkt], f: usize) -> usize {
+    let need = main_data_begin(&pkts[f]);
+    let (mut k, mut have) = (0usize, 0usize);
+    while have < need && k < f {
+        k += 1;
+        have += main_data_len(&pkts[f - k]);
+    }
+    k
+}
+
+/// Frames before `goal` a Layer III decode must start with: the goal and the two frames before
+/// it (the overlap and the filterbank history of the goal's first granule) must find the main
+/// data they point back to, at most 32 frames back.
 fn reservoir_preroll(pkts: &[Pkt], goal: u64) -> u64 {
     let goal = goal as usize;
-    let need = main_data_begin(&pkts[goal]);
-    let (mut k, mut have) = (0usize, 0usize);
-    while have < need && k < 31 && k < goal {
-        k += 1;
-        have += main_data_len(&pkts[goal - k]);
-    }
-    (k + 1).min(goal) as u64
+    (goal.saturating_sub(2)..=goal)
+        .map(|f| goal - f + frames_to_cover(pkts, f))
+        .max()
+        .unwrap()
+        .min(32)
+        .min(goal) as u64
 }
 
 #[test]
@@ -971,17 +987,19 @@ fn low_bitrate_seeks_start_early_enough_to_cover_the_reservoir() {
                 reservoir_preroll(&pkts, goal),
                 "{name} {goal}"
             );
-            // The main data of the frames from `start` up to the goal covers what the goal
-            // frame needs (or the stream starts there).
-            let have: usize = pkts[start as usize..goal as usize]
-                .iter()
-                .map(main_data_len)
-                .sum();
-            assert!(
-                start == 0 || have >= main_data_begin(&pkts[goal as usize]),
-                "{name} goal {goal}: have {have}, need {}",
-                main_data_begin(&pkts[goal as usize])
-            );
+            // The main data of the frames from `start` covers what the goal and the two
+            // frames before it need (or the stream starts there).
+            for f in goal.saturating_sub(2).max(start)..=goal {
+                let have: usize = pkts[start as usize..f as usize]
+                    .iter()
+                    .map(main_data_len)
+                    .sum();
+                assert!(
+                    start == 0 || have >= main_data_begin(&pkts[f as usize]),
+                    "{name} goal {goal} frame {f}: have {have}, need {}",
+                    main_data_begin(&pkts[f as usize])
+                );
+            }
             if goal - start > 2 {
                 deeper_than_two += 1;
             }
@@ -1118,12 +1136,12 @@ fn a_stream_shorter_than_its_declared_frame_count() {
             actual: 100
         }]
     );
-    // A cut inside the next header leaves stray bytes: the count catches it.
-    let last = pkts.last().unwrap();
+    // A cut inside the next header leaves stray bytes: the count catches it. (One frame short\n    // is within the tolerance for encoders that count the header frame, so cut two.)
+    let last = &pkts[pkts.len() - 2];
     let stray = plain[..last.offset as usize + 2].to_vec();
     let mut d = open(stray, &strict());
     let (got, r, _) = read_all(&mut d);
-    assert_eq!(got.len(), pkts.len() - 1);
+    assert_eq!(got.len(), pkts.len() - 2);
     assert_eq!(invalid(&r).0, "mpeg frame count");
     // Seeking in such a file does not fail.
     let mut d = open(cut, &strict());
@@ -1158,5 +1176,109 @@ fn resilient_seek_counts_a_gap_like_reading_does() {
             (want.pts, want.offset, &want.data)
         );
         assert_eq!(to.frame + to.preroll, goal * 1152);
+    }
+}
+
+// ---------------------------------------------------------------- declared frame count and gapless conflicts
+
+/// CRC-16/ARC (the LAME tag checksum).
+fn arc(data: &[u8]) -> u16 {
+    let mut crc = 0u16;
+    for &b in data {
+        crc ^= u16::from(b);
+        for _ in 0..8 {
+            crc = if crc & 1 != 0 {
+                (crc >> 1) ^ 0xA001
+            } else {
+                crc >> 1
+            };
+        }
+    }
+    crc
+}
+
+/// Rewrites the Info header of `cbr128-48k-stereo.mp3` (frame count, encoder delay and
+/// padding) and fixes the LAME tag checksum so that the tag stays trusted.
+fn with_tag(frames: u32, delay: u16, padding: u16) -> Vec<u8> {
+    let mut data = fixture("cbr128-48k-stereo.mp3");
+    let info = data.windows(4).position(|w| w == b"Info").unwrap();
+    let frame = info - 36;
+    let o = info + 120; // the LAME tag: Info, flags, frames, bytes, TOC (100), quality
+    data[info + 8..info + 12].copy_from_slice(&frames.to_be_bytes());
+    data[o + 21] = (delay >> 4) as u8;
+    data[o + 22] = ((delay & 15) << 4) as u8 | (padding >> 8) as u8;
+    data[o + 23] = padding as u8;
+    let crc = arc(&data[frame..o + 34]);
+    data[o + 34..o + 36].copy_from_slice(&crc.to_be_bytes());
+    data
+}
+
+#[test]
+fn a_declared_frame_count_may_count_the_info_frame() {
+    // The fixture has 126 frames. Some encoders count the Info frame too (127).
+    for declared in [126, 127] {
+        for opts in [strict(), resilient()] {
+            let mut d = open(with_tag(declared, 576, 1000), &opts);
+            assert_eq!(d.tracks()[0].gapless, GaplessKind::FromMetadata);
+            let (pkts, r, ev) = read_all(&mut d);
+            assert_eq!((r, pkts.len()), (Ok(()), 126), "declared {declared}");
+            assert!(ev.is_empty(), "declared {declared}: {ev:?}");
+        }
+    }
+}
+
+#[test]
+fn any_other_declared_frame_count_is_an_error_or_clamped() {
+    for declared in [125u32, 128, 1000] {
+        let data = with_tag(declared, 576, 1000);
+        let mut d = open(data.clone(), &strict());
+        let (pkts, r, _) = read_all(&mut d);
+        assert_eq!(pkts.len(), 126, "declared {declared}");
+        assert_eq!(invalid(&r).0, "mpeg frame count", "declared {declared}");
+        let mut d = open(data, &resilient());
+        let (pkts, r, ev) = read_all(&mut d);
+        assert_eq!((r, pkts.len()), (Ok(()), 126));
+        assert_eq!(
+            ev,
+            vec![Event::Clamped {
+                what: "mpeg frame count",
+                declared: u64::from(declared),
+                actual: 126
+            }],
+            "declared {declared}"
+        );
+    }
+}
+
+#[test]
+fn a_tag_that_does_not_fit_the_frame_count_is_a_gapless_conflict() {
+    // 3 frames are 3456 samples; 576 + 529 of delay and 4095 - 529 of padding exceed them.
+    let mut d = open(with_tag(3, 576, 4095), &resilient());
+    let t = d.tracks()[0].clone();
+    assert_eq!(
+        (t.delay, t.padding, t.gapless),
+        (529, 0, GaplessKind::Unknown)
+    );
+    let mut ev = Vec::new();
+    d.drain_events(&mut ev);
+    assert_eq!(
+        ev,
+        vec![Event::GaplessConflict {
+            what: "lame tag exceeds frame count"
+        }]
+    );
+}
+
+#[test]
+fn a_consistent_tag_and_an_untagged_stream_report_no_conflict() {
+    for name in [
+        "cbr128-48k-stereo.mp3",
+        "nolame-cbr128-48k.mp3",
+        "mp2-128k-44k-stereo.mp2",
+    ] {
+        let mut d = open(fixture(name), &resilient());
+        let mut ev = Vec::new();
+        d.drain_events(&mut ev);
+        assert!(ev.is_empty(), "{name}: {ev:?}");
     }
 }

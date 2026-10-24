@@ -8,8 +8,19 @@
 //! allocates nothing per packet once the output buffer has grown to the frame size.
 //!
 //! Layer III reads its main data through a bit reservoir that spans frames. A granule whose
-//! data starts before the first frame the decoder has seen (the start of a stream, or a seek
-//! without enough preroll) decodes to silence.
+//! data starts before the first frame the decoder has seen decodes to silence. That is
+//! expected, and silent, in two places only:
+//!
+//! - inside the preroll announced with [`Decoder::set_preroll`] after a seek (packets that
+//!   end at or before the announced position; the caller discards their output), and
+//! - at the start of the stream (a first packet with `pts == 0`) or right after a gap of lost
+//!   frames, if the first frame decoded points back before itself: until the reservoir holds
+//!   the 511 bytes that `main_data_begin` can reach (the stream was cut out of a longer one,
+//!   or the frames it needs were lost and already reported by the demuxer).
+//!
+//! Anywhere else the stream is damaged: `Mode::Strict` returns `Invalid { what: "mp3
+//! reservoir" }` and `Mode::Resilient` replaces the frame by silence and reports a
+//! `CorruptFrame`.
 //!
 //! Errors carry the absolute source offset (`Packet::offset` plus the position inside the
 //! frame). In `Mode::Strict` a damaged frame (bad header, CRC mismatch, forbidden bit
@@ -40,6 +51,9 @@ use vynamp_decode_core::{
 };
 use vynamp_decode_mpa::parse_header;
 
+/// The furthest back `main_data_begin` can reach into earlier frames' main data (9 bits).
+const MAX_RESERVOIR_REACH: usize = 511;
+
 /// Largest number of frames (per channel) a packet can decode to.
 const MAX_FRAMES: u32 = MAX_SAMPLES as u32;
 
@@ -54,6 +68,15 @@ pub struct MpegDecoder {
     layer3: Option<Box<Layer3Decoder>>,
     pcm: Box<[[f32; MAX_SAMPLES]; 2]>,
     events: Vec<Event>,
+    /// End of the announced seek preroll (see [`Decoder::set_preroll`]).
+    preroll_until: Option<u64>,
+    /// No Layer III frame was decoded since the start, the last reset or the last gap.
+    fresh: bool,
+    /// The fresh state follows a gap of lost frames.
+    after_gap: bool,
+    /// The first frame of the fresh state pointed back before itself: missing reservoir data
+    /// is expected until the reservoir holds `MAX_RESERVOIR_REACH` bytes.
+    lead_in: bool,
 }
 
 impl MpegDecoder {
@@ -87,6 +110,10 @@ impl MpegDecoder {
             layer3: (layer == 3).then(|| Box::new(Layer3Decoder::new())),
             pcm: Box::new([[0.0; MAX_SAMPLES]; 2]),
             events: Vec::new(),
+            preroll_until: None,
+            fresh: true,
+            after_gap: false,
+            lead_in: false,
         })
     }
 
@@ -160,6 +187,7 @@ impl MpegDecoder {
             )?;
             layer2::SAMPLES
         };
+        self.check_reservoir(packet, frames)?;
         self.max_frames_check(packet.pts, frames)?;
         out.reset(SampleFormat::F32, self.channels, frames)?;
         for c in 0..usize::from(self.channels) {
@@ -168,6 +196,35 @@ impl MpegDecoder {
             }
         }
         Ok(())
+    }
+
+    /// Decides whether granules silenced for lack of reservoir data are expected here (see the
+    /// crate documentation).
+    fn check_reservoir(&mut self, packet: &Packet, frames: usize) -> Result<()> {
+        let Some(l3) = &self.layer3 else {
+            return Ok(());
+        };
+        let starved = l3.starved();
+        if self.fresh {
+            self.fresh = false;
+            self.lead_in = starved && (packet.pts == 0 || self.after_gap);
+            self.after_gap = false;
+        }
+        if !starved {
+            return Ok(());
+        }
+        let in_preroll = self
+            .preroll_until
+            .is_some_and(|until| packet.pts.saturating_add(frames as u64) <= until);
+        let in_lead_in = self.lead_in && l3.reservoir_before() < MAX_RESERVOIR_REACH;
+        if in_preroll || in_lead_in {
+            Ok(())
+        } else {
+            Err(Error::Invalid {
+                what: "mp3 reservoir",
+                offset: packet.offset,
+            })
+        }
     }
 
     fn max_frames_check(&self, pts: u64, frames: usize) -> Result<()> {
@@ -181,6 +238,13 @@ impl MpegDecoder {
 impl Decoder for MpegDecoder {
     fn decode(&mut self, packet: &Packet, out: &mut AudioBuffer) -> Result<()> {
         if packet.data.is_empty() {
+            // Lost frames: their main data is gone with them.
+            if let Some(l3) = &mut self.layer3 {
+                l3.reset();
+            }
+            self.fresh = true;
+            self.after_gap = true;
+            self.lead_in = false;
             return self.silence(packet.pts, packet.frames, out);
         }
         match self.decode_frame(packet, out) {
@@ -212,6 +276,14 @@ impl Decoder for MpegDecoder {
         if let Some(l3) = &mut self.layer3 {
             l3.reset();
         }
+        self.preroll_until = None;
+        self.fresh = true;
+        self.after_gap = false;
+        self.lead_in = false;
+    }
+
+    fn set_preroll(&mut self, until: u64) {
+        self.preroll_until = Some(until);
     }
 
     fn drain_events(&mut self, out: &mut Vec<Event>) {

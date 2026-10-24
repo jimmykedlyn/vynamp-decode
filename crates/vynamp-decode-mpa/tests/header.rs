@@ -197,3 +197,16 @@ fn probe_tolerates_leading_junk_and_a_cut_last_frame() {
     v.truncate(v.len() - 200); // the last frame is cut
     assert_eq!(probe_mpa(&v), 90);
 }
+
+#[test]
+fn probe_gives_no_score_to_a_free_format_header_away_from_the_start() {
+    // A free-format header (bitrate index 0) has no length to follow, so away from the start
+    // it is as likely to be chance as any lone header: zero bytes after a damaged ID3 tag.
+    let mut v = b"ID3\x04\x00\x00\xFF\xFF\xFF\xFF".to_vec();
+    v.resize(2000, 0);
+    assert_eq!(probe_mpa(&v), 0);
+    // At the very start it still counts a little (the demuxer measures the frame length).
+    let mut free = vec![0xFF, 0xFB, 0x00, 0x00];
+    free.resize(2000, 0);
+    assert_eq!(probe_mpa(&free), 30);
+}

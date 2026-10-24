@@ -171,6 +171,10 @@ impl Layer3 {
 /// once the reservoir buffers have reached their size.
 pub(crate) struct Layer3Decoder {
     bits: Layer3,
+    /// The last decoded frame had a granule without its main data (`NeedsPreroll`).
+    starved: bool,
+    /// Bytes of main data in the reservoir when that frame started.
+    reservoir_before: usize,
     frame: Box<FrameData>,
     overlap: [Overlap; 2],
     /// Requantized lines of both channels.
@@ -185,6 +189,8 @@ impl Layer3Decoder {
         imdct::warm_up();
         Self {
             bits: Layer3::default(),
+            starved: false,
+            reservoir_before: 0,
             frame: FrameData::new(),
             overlap: [Overlap::new(), Overlap::new()],
             xr: Box::new([[0.0; 576]; 2]),
@@ -195,6 +201,17 @@ impl Layer3Decoder {
     pub(crate) fn reset(&mut self) {
         self.bits.reset();
         self.clear_overlap();
+    }
+
+    /// Whether the last frame decoded had a granule whose main data lies before the reservoir
+    /// (silent in the output).
+    pub(crate) fn starved(&self) -> bool {
+        self.starved
+    }
+
+    /// Bytes of main data the reservoir held when the last frame was decoded.
+    pub(crate) fn reservoir_before(&self) -> usize {
+        self.reservoir_before
     }
 
     /// Forgets the overlap only (after a frame was replaced by silence).
@@ -221,8 +238,13 @@ impl Layer3Decoder {
         synth: &mut [Synthesis; 2],
         pcm: &mut [[f32; crate::tables::MAX_SAMPLES]; 2],
     ) -> Result<usize> {
+        self.reservoir_before = self.bits.reservoir.len();
+        self.starved = false;
         decode_granules(&mut self.bits, frame, header, offset, &mut self.frame)?;
         let channels = self.frame.channels;
+        self.starved = (0..self.frame.granules).any(|g| {
+            (0..channels).any(|c| self.frame.gr[g][c].status == GranuleStatus::NeedsPreroll)
+        });
         let joint = header.channel_mode == ChannelMode::JointStereo && channels == 2;
         let tools = stereo::Stereo {
             version: header.version,

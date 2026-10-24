@@ -291,9 +291,194 @@ fn a_gap_marker_and_a_reset_decode_to_silence_then_resume() {
     assert_eq!(out.frames(), 1152);
     assert!(out.plane_f32(0).unwrap().iter().all(|&v| v == 0.0));
     // After a reset the reservoir is gone: a frame that points back into it decodes its
-    // unreachable granules to silence (no error), as the stream start does.
+    // unreachable granules to silence (no error) inside the preroll the caller announced.
     d.reset();
+    d.set_preroll(9 * 1152);
     let (off, f) = frames[8];
     d.decode(&packet_of(f, off, 8 * 1152), &mut out).unwrap();
     assert_eq!(out.frames(), 1152);
+}
+
+// ---------------------------------------------------------------- missing reservoir data
+
+/// `main_data_begin` of a Layer III frame.
+fn main_data_begin(frame: &[u8]) -> usize {
+    let h = parse_header(frame[..4].try_into().unwrap()).unwrap();
+    let o = 4 + if h.crc { 2 } else { 0 };
+    match h.version {
+        MpegVersion::V1 => usize::from(frame[o]) << 1 | usize::from(frame[o + 1] >> 7),
+        _ => usize::from(frame[o]),
+    }
+}
+
+/// The first frame at or after `from` whose main data starts in earlier frames.
+fn first_with_reservoir(frames: &[(u64, &[u8])], from: usize) -> usize {
+    (from..frames.len())
+        .find(|&i| main_data_begin(frames[i].1) > 0)
+        .expect("a frame with main_data_begin > 0")
+}
+
+fn first_granule_is_silent(out: &AudioBuffer, channels: u16) -> bool {
+    (0..usize::from(channels)).all(|c| {
+        out.plane_f32(c).unwrap()[..out.frames().min(576)]
+            .iter()
+            .all(|&v| v == 0.0)
+    })
+}
+
+#[test]
+fn missing_reservoir_data_outside_the_preroll_is_damage() {
+    for fx in [&FIXTURES[0], &FIXTURES[9], &FIXTURES[14]] {
+        let data = fixture(&format!("{}.mp3", fx.name));
+        let frames = split_frames(&data);
+        let spf = u64::from(
+            parse_header(frames[0].1[..4].try_into().unwrap())
+                .unwrap()
+                .samples,
+        );
+        let k = first_with_reservoir(&frames, 3);
+        let (offset, f) = frames[k];
+        let pts = k as u64 * spf;
+        let mut out = AudioBuffer::new();
+
+        // Strict: an error at the frame.
+        let err = dec(fx.rate, fx.channels, Mode::Strict)
+            .decode(&packet_of(f, offset, pts), &mut out)
+            .unwrap_err();
+        assert_eq!(
+            err,
+            Error::Invalid {
+                what: "mp3 reservoir",
+                offset
+            },
+            "{}",
+            fx.name
+        );
+
+        // Resilient: the frame's worth of silence and one event.
+        let mut d = dec(fx.rate, fx.channels, Mode::Resilient);
+        d.decode(&packet_of(f, offset, pts), &mut out).unwrap();
+        assert_eq!(out.frames() as u64, spf);
+        for c in 0..usize::from(fx.channels) {
+            assert!(out.plane_f32(c).unwrap().iter().all(|&v| v == 0.0));
+        }
+        let mut ev = Vec::new();
+        d.drain_events(&mut ev);
+        assert_eq!(
+            ev,
+            vec![Event::CorruptFrame {
+                pts,
+                offset,
+                frames: spf as u32
+            }],
+            "{}",
+            fx.name
+        );
+    }
+}
+
+#[test]
+fn the_announced_preroll_makes_missing_reservoir_data_silence() {
+    let fx = &FIXTURES[0];
+    let data = fixture(&format!("{}.mp3", fx.name));
+    let frames = split_frames(&data);
+    let k = first_with_reservoir(&frames, 3);
+    let (offset, f) = frames[k];
+    let pts = k as u64 * 1152;
+    let mut out = AudioBuffer::new();
+    let mut d = dec(fx.rate, 2, Mode::Strict);
+    // The frame ends at (k + 1) * 1152: it lies wholly inside the preroll.
+    d.set_preroll(pts + 1152);
+    d.decode(&packet_of(f, offset, pts), &mut out).unwrap();
+    assert_eq!(out.frames(), 1152);
+    assert!(first_granule_is_silent(&out, 2));
+    let mut ev = Vec::new();
+    d.drain_events(&mut ev);
+    assert!(ev.is_empty());
+
+    // A frame that reaches past the announced preroll is not covered by it (the seek lands
+    // so that the goal frame has all its data) ...
+    let mut d = dec(fx.rate, 2, Mode::Strict);
+    d.set_preroll(pts + 1151);
+    let err = d.decode(&packet_of(f, offset, pts), &mut out).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            Error::Invalid {
+                what: "mp3 reservoir",
+                ..
+            }
+        ),
+        "{err:?}"
+    );
+
+    // ... and a reset withdraws the announcement.
+    let mut d = dec(fx.rate, 2, Mode::Strict);
+    d.set_preroll(pts + 1152);
+    d.reset();
+    let err = d.decode(&packet_of(f, offset, pts), &mut out).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            Error::Invalid {
+                what: "mp3 reservoir",
+                ..
+            }
+        ),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn a_stream_that_starts_inside_the_reservoir_decodes_silently_until_it_is_filled() {
+    // A stream cut out of a longer one: its first frame has main_data_begin > 0, and the
+    // timeline starts at 0 for it. Frames starved of data before the reservoir holds the 511
+    // bytes that main_data_begin can reach back are silence, with no error and no event.
+    let fx = &FIXTURES[0];
+    let data = fixture(&format!("{}.mp3", fx.name));
+    let frames = split_frames(&data);
+    let k = first_with_reservoir(&frames, 3);
+    for mode in [Mode::Strict, Mode::Resilient] {
+        let mut d = dec(fx.rate, 2, mode);
+        let mut out = AudioBuffer::new();
+        for (n, (off, f)) in frames[k..].iter().enumerate() {
+            d.decode(&packet_of(f, *off, n as u64 * 1152), &mut out)
+                .unwrap_or_else(|e| panic!("{mode:?} frame {n}: {e:?}"));
+            assert_eq!(out.frames(), 1152);
+            if n == 0 {
+                assert!(first_granule_is_silent(&out, 2));
+            }
+        }
+        let mut ev = Vec::new();
+        d.drain_events(&mut ev);
+        assert!(ev.is_empty(), "{ev:?}");
+    }
+}
+
+#[test]
+fn a_gap_empties_the_reservoir_and_the_frames_after_it_are_silent_not_garbage() {
+    let fx = &FIXTURES[0];
+    let data = fixture(&format!("{}.mp3", fx.name));
+    let frames = split_frames(&data);
+    let j = first_with_reservoir(&frames, 6);
+    let mut d = dec(fx.rate, 2, Mode::Strict);
+    let mut out = AudioBuffer::new();
+    for (n, (off, f)) in frames.iter().enumerate().take(5) {
+        d.decode(&packet_of(f, *off, n as u64 * 1152), &mut out)
+            .unwrap();
+    }
+    // The frames from 5 to j are lost: the demuxer delivers empty packets for them.
+    for n in 5..j {
+        d.decode(&packet_of(&[], 0, n as u64 * 1152), &mut out)
+            .unwrap();
+    }
+    // What the next frame needs from the lost ones is not there: its first granule is silent,
+    // and this is part of the gap that was already reported.
+    let (off, f) = frames[j];
+    d.decode(&packet_of(f, off, j as u64 * 1152), &mut out)
+        .unwrap();
+    assert!(first_granule_is_silent(&out, 2));
+    let mut ev = Vec::new();
+    d.drain_events(&mut ev);
+    assert!(ev.is_empty());
 }

@@ -130,3 +130,35 @@ foreach ($c in $l3cases) {
   if ($LASTEXITCODE -ne 0) { throw "ffmpeg decode failed for $name" }
 }
 Write-Host "wrote $($l3cases.Count) Layer III fixtures to $mp3out"
+
+# ---- Gapless fixtures (crates/vynamp-decode/tests/fixtures/mpeg) ----
+# PCM derived from tools/fixtures/source-sine.wav (looped, downmixed or resampled) as 16-bit
+# WAV (`<name>.src.wav`), the libmp3lame encode of exactly that WAV WITH FFmpeg's Xing/Info and
+# LAME tag (`<name>.mp3`; the tag carries the encoder delay and padding), and FFmpeg's own
+# gapless decode of the MP3 by `mp3float` (`<name>.ref.f32`, raw interleaved little-endian f32):
+# FFmpeg's demuxer reads the LAME tag and trims the encoder delay + 529 + 1 samples at the start
+# and the padding at the end. The facade tests compare the Reader's output against both.
+$gout = Join-Path $root 'crates/vynamp-decode/tests/fixtures/mpeg'
+New-Item -ItemType Directory -Force $gout | Out-Null
+# name, source loops, extra filter/format args (before the WAV), encoder args
+$gcases = @(
+  @('g-cbr128-48k-stereo', 3, @(), @('-b:a','128k')),
+  @('g-vbr2-48k-stereo',   3, @(), @('-q:a','2')),
+  @('g-mono-48k-64k',      3, @('-ac','1'), @('-b:a','64k')),
+  @('g-mpeg2-22k-stereo',  3, @('-ar','22050'), @('-b:a','64k')),
+  @('g-cbr128-48k-odd',    1, @('-af','atrim=end_sample=3999'), @('-b:a','128k'))
+)
+foreach ($c in $gcases) {
+  $name, $loops, $pre, $enc = $c
+  $wav = Join-Path $gout "$name.src.wav"
+  $mp3 = Join-Path $gout "$name.mp3"
+  $ref = Join-Path $gout "$name.ref.f32"
+  Remove-Item -Force -ErrorAction SilentlyContinue $wav, $mp3, $ref
+  & $FFmpeg -v error -y -stream_loop ($loops - 1) -i $src @pre -fflags +bitexact -c:a pcm_s16le $wav
+  if ($LASTEXITCODE -ne 0) { throw "ffmpeg wav failed for $name" }
+  & $FFmpeg -v error -y -i $wav -fflags +bitexact -flags:a +bitexact -c:a libmp3lame @enc $mp3
+  if ($LASTEXITCODE -ne 0) { throw "ffmpeg encode failed for $name" }
+  & $FFmpeg -v error -y -c:a mp3float -i $mp3 -f f32le -c:a pcm_f32le $ref
+  if ($LASTEXITCODE -ne 0) { throw "ffmpeg decode failed for $name" }
+}
+Write-Host "wrote $($gcases.Count) gapless fixtures to $gout"

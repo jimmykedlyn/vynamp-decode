@@ -10,8 +10,8 @@
 //! Strict mode turns a lost sync that is followed by a later frame into `Invalid { what:
 //! "mpeg sync" }` and a truncated final frame into `Invalid { what: "unexpected eof" }`. Bytes
 //! after the last frame that contain no further frame end the stream (Resilient mode reports
-//! them once); a Xing/VBRI frame count above the number of frames found is `Invalid { what:
-//! "mpeg frame count" }` (Resilient: `Event::Clamped`). A frame whose successor is not a header
+//! them once); a Xing/VBRI frame count that is neither the number of frames found nor that number plus
+//! one is `Invalid { what: "mpeg frame count" }` (Resilient: `Event::Clamped`). A frame whose successor is not a header
 //! of the stream is checked against the next confirmed frame: if the damage does not fit a
 //! frame there, the frame's own header (and so its length) is wrong. Resilient mode looks for the next
 //! confirmed frame, reports the lost span as one `Event::CorruptFrame` (the number of lost
@@ -44,7 +44,7 @@ const MAX_FREE_FRAME: usize = 4096;
 /// How far past the start of the audio the first frame is searched for.
 const MAX_SYNC_SCAN: u64 = 1 << 20;
 /// Layer III seeks look back at most this many frames for the main data of the bit reservoir
-/// (`main_data_begin` reaches back at most 511 bytes), overlap frame included.
+/// (`main_data_begin` reaches back at most 511 bytes), for the goal and the two frames before it.
 const MAX_PREROLL_LAYER3: u64 = 32;
 /// Layers I and II have no reservoir; one frame warms the synthesis filterbank up.
 const PREROLL_OTHER: u64 = 1;
@@ -482,8 +482,6 @@ impl MpaDemuxer {
         }
     }
 
-    /// Ends the stream. A Xing/VBRI frame count that is larger than the number of frames
-    /// delivered means the stream was cut: an error in Strict mode, `Clamped` in Resilient.
     fn note_bitrate(&mut self, bitrate: u32) {
         if self.last_bitrate != 0 && bitrate != self.last_bitrate {
             self.bitrate_varies = true;
@@ -491,10 +489,13 @@ impl MpaDemuxer {
         self.last_bitrate = bitrate;
     }
 
+    /// Ends the stream. A Xing/VBRI frame count must equal the number of frames delivered, or
+    /// exceed it by one (some encoders count the header frame too). Anything else means the
+    /// stream was cut or extended: an error in Strict mode, `Clamped` in Resilient.
     fn finish(&mut self) -> Result<bool> {
         self.done = true;
         if let Some(declared) = self.vbr.as_ref().and_then(|v| v.frames)
-            && self.idx < u64::from(declared)
+            && !(self.idx..=self.idx + 1).contains(&u64::from(declared))
         {
             if self.strict() {
                 return Err(Error::Invalid {
@@ -583,44 +584,49 @@ impl MpaDemuxer {
         })
     }
 
-    /// Chooses where a Layer III decode must start to reach frame `goal`. `pos0`/`idx0` is the
-    /// earliest frame considered (at most `MAX_PREROLL_LAYER3` before the goal). The goal frame
-    /// needs `main_data_begin` bytes of main data from the frames before it; those are taken
-    /// from the nearest frames back until their main data (frame length minus header, CRC and
-    /// side information) covers it, and one more frame is added for the overlap of the inverse
-    /// MDCT. Returns the position and index of that frame.
+    /// Chooses where a Layer III decode must start to reach frame `goal`, so that the output
+    /// from the goal on is the same as when decoding from the start of the stream. `pos0`/`idx0`
+    /// is the earliest frame considered (at most `MAX_PREROLL_LAYER3` before the goal).
+    ///
+    /// A frame can be decoded when the frames decoded before it hold its `main_data_begin`
+    /// bytes of main data (frame length minus header, CRC and side information). The goal
+    /// must be decodable, and so must the two frames before it: the inverse MDCT of a granule
+    /// overlaps the previous one, and the polyphase filterbank needs 16 slots of history, so
+    /// the goal's first granule is exact only if the two granules before it were decoded from
+    /// real data (a granule of MPEG-2/2.5 is a whole frame). Each of the three frames needs a
+    /// start; the earliest is taken. Returns the position and index of that frame.
     fn reservoir_start(&mut self, pos0: u64, idx0: u64, goal: u64) -> Result<(u64, u64)> {
         if idx0 >= goal {
             return Ok((pos0, idx0));
         }
-        // (position, frame length, main data bytes) of the frames idx0..goal.
-        let mut frames: Vec<(u64, usize, usize)> = Vec::new();
+        // (position, frame length, main data bytes, main_data_begin) of the frames idx0..=goal.
+        let mut frames: Vec<(u64, usize, usize, usize)> = Vec::new();
         let mut pos = pos0;
-        for _ in idx0..goal {
+        for _ in idx0..=goal {
             let Some((h, len)) = self.frame_at(pos)? else {
                 return Ok((pos0, idx0));
             };
             let data = len.saturating_sub(4 + if h.crc { 2 } else { 0 } + h.side_info_len());
-            frames.push((pos, len, data));
+            let need = self.main_data_begin(pos, &h)?;
+            frames.push((pos, len, data, need));
             pos += len as u64;
         }
-        let Some((h, _)) = self.frame_at(pos)? else {
-            return Ok((pos0, idx0));
-        };
-        let need = self.main_data_begin(pos, &h)?;
-        let (mut back, mut have) = (0, 0);
-        while have < need && back < frames.len() {
-            back += 1;
-            have += frames[frames.len() - back].2;
+        let last = frames.len() - 1;
+        let mut start = last;
+        for f in last.saturating_sub(2)..=last {
+            let need = frames[f].3;
+            let (mut back, mut have) = (0, 0);
+            while have < need && back < f {
+                back += 1;
+                have += frames[f - back].2;
+            }
+            start = start.min(f - back);
         }
-        let back = (back + 1).min(frames.len());
-        let i = frames.len() - back;
-        if i > 0 {
-            self.last_len = frames[i - 1].1;
+        if start > 0 {
+            self.last_len = frames[start - 1].1;
         }
-        Ok((frames[i].0, idx0 + i as u64))
+        Ok((frames[start].0, idx0 + start as u64))
     }
-
     /// The position where the data ends, searching forward from `pos`.
     fn data_end(&mut self, mut pos: u64) -> Result<u64> {
         loop {
@@ -678,7 +684,7 @@ impl MpaDemuxer {
 /// times the samples per frame, and `gapless` is `FromMetadata`: the trimmed length
 /// `frames - delay - padding` is the length of the encoded PCM. Gapless is exact only if the tag's padding is at least 529: a smaller
 /// padding cannot be taken from the decoder delay and saturates to 0 (the usual behaviour), so
-/// the trimmed length may then be up to 529 samples too long. Without a LAME tag a Layer
+/// the output is then shorter than the encoded PCM by up to 529 samples (the tail was never encoded; FFmpeg trims the same way). A tag whose delay and padding do not fit the frame count is ignored and reported as `Event::GaplessConflict`. Without a LAME tag a Layer
 /// III track has `delay = 529` and `gapless = Unknown`; Layer I and II tracks have
 /// `delay = 481` (the synthesis filterbank delay; these layers carry no encoder delay
 /// metadata), `padding = 0` and `Unknown`.
@@ -767,7 +773,7 @@ pub fn open_mpa(mut src: Box<dyn Source>, opts: &Options) -> Result<MpaDemuxer> 
     let mut gapless = GaplessKind::Unknown;
     if h.layer == 3
         && let Some(total) = frames
-        && let Some(lame) = d.vbr.as_ref().and_then(|v| v.lame.as_ref())
+        && let Some(lame) = d.vbr.as_ref().and_then(|v| v.lame.clone())
         && lame.crc_ok
     {
         let dl = u32::from(lame.encoder_delay) + MP3_DECODER_DELAY;
@@ -776,6 +782,10 @@ pub fn open_mpa(mut src: Box<dyn Source>, opts: &Options) -> Result<MpaDemuxer> 
             delay = dl;
             padding = pd;
             gapless = GaplessKind::FromMetadata;
+        } else {
+            d.event(Event::GaplessConflict {
+                what: "lame tag exceeds frame count",
+            });
         }
     }
     d.tracks.push(Track {

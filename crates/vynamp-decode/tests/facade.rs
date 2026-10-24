@@ -819,12 +819,19 @@ fn codec_lookup() {
         reg.codec_for(&CodecId::Flac).is_some(),
         cfg!(feature = "flac")
     );
-    assert!(reg.codec_for(&CodecId::Mp3).is_none());
+    for id in [CodecId::Mp1, CodecId::Mp2, CodecId::Mp3] {
+        assert_eq!(
+            reg.codec_for(&id).is_some(),
+            cfg!(feature = "mp3"),
+            "{id:?}"
+        );
+    }
     assert_eq!(
         reg.containers().count(),
         usize::from(cfg!(feature = "riff"))
             + usize::from(cfg!(feature = "aiff"))
             + usize::from(cfg!(feature = "flac"))
+            + usize::from(cfg!(feature = "mpa"))
     );
 }
 
