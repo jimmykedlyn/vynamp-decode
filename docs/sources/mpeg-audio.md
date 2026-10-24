@@ -1,0 +1,48 @@
+# MPEG audio (Layer I, II, III)
+
+Public descriptions consulted for `vynamp-decode-mpa` (the elementary stream demuxer). No
+FFmpeg, mpg123, libmad, LAME or other GPL/LGPL source code was read or copied; the
+implementation was written from the format descriptions below. FFmpeg is used only as a
+dev-time tool: it writes the fixtures (`tools/fixtures/generate-mpeg-dev.ps1`) and
+`ffprobe -count_packets` supplied the expected packet counts recorded in the tests.
+
+- ISO/IEC 11172-3:1993 (MPEG-1 audio) and ISO/IEC 13818-3:1998 (MPEG-2 audio), as publicly
+  described: the 32-bit frame header (11-bit sync, version, layer, protection bit,
+  bitrate index, sample rate index, padding, channel mode, mode extension, emphasis), the
+  bitrate tables for MPEG-1 Layers I, II and III and for MPEG-2/2.5 Layer I and Layers II/III,
+  the sample rates (44.1, 48, 32 kHz; 22.05, 24, 16 kHz; 11.025, 12, 8 kHz), the frame length
+  formulas (Layer I: `(12 * bitrate / sample rate + padding) * 4`; Layer II and MPEG-1
+  Layer III: `144 * bitrate / sample rate + padding`; MPEG-2/2.5 Layer III:
+  `72 * bitrate / sample rate + padding`), samples per frame (384, 1152, 1152 and 576), the
+  Layer III side information sizes (17/32 bytes in MPEG-1, 9/17 in MPEG-2/2.5) and free format
+  (bitrate index 0, length given by the distance between headers). MPEG-2.5 is the unofficial
+  extension with version bits `00`. The tables are small and were typed in from these
+  descriptions; the CC0 `minimp3` tables are not used by this crate (they are for the decoder
+  tasks).
+- Xing/Info header (Xing Technology, as documented publicly): `Xing` or `Info` after the side
+  information, flags (frames, bytes, TOC, quality), 100-byte TOC. `Info` is the same layout for
+  constant bitrate files.
+- LAME tag (LAME project's public "LAME tag" description): the 36 bytes after the Xing fields:
+  encoder string, revision/VBR method, low-pass, replay gain, flags, bitrate, the 12-bit
+  encoder delay and 12-bit padding, music length, music CRC and tag CRC. **Tag CRC variant:**
+  CRC-16/ARC (polynomial 0x8005 processed LSB first, i.e. 0xA001, initial value 0, no final
+  XOR) over the frame bytes before the CRC field, which is the first 190 bytes of an MPEG-1
+  stereo frame. Verified on three files written by LAME 3.99r and three written by FFmpeg's
+  Lavc 57.48 muxer (read locally, not committed: the stored CRC equalled the computed one in
+  all six). FFmpeg's muxer writes the CRC over the first 190 bytes with the CRC field zeroed
+  even for layouts where the tag ends earlier (MPEG-2, mono; the committed 22.05 kHz
+  fixture shows it), so the demuxer accepts either span.
+- Gapless arithmetic: the decoder's own delay is 529 samples (polyphase filterbank 481 plus
+  the IMDCT overlap, the usual figure for MP3 decoders). `delay = encoder_delay + 529` and
+  `padding = tag padding - 529`; `frames * samples per frame - delay - padding` equals the
+  length of the encoded PCM. This was checked against the PCM length on the committed fixtures
+  (48, 44.1, 22.05 and 8 kHz; stereo and mono).
+- VBRI (Fraunhofer): `VBRI` at offset 36 of the first frame, version, delay, quality, bytes,
+  frames, table entry count, scale, entry size, frames per entry, table. The delay field is
+  ignored.
+- Seek preroll: the Layer III bit reservoir holds at most 511 bytes (the 9-bit
+  `main_data_begin` of MPEG-1; 255 in MPEG-2), which spans at most two earlier frames at the
+  lowest bitrates, hence two frames of preroll; Layers I and II have no reservoir and one frame
+  warms the synthesis filterbank up. The decoder task checks the figures against its output.
+- ID3v2, ID3v1, APEv2 and Lyrics3v2 tags are handled by the core `skip_id3v2` and
+  `find_trailers`.
