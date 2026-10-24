@@ -20,7 +20,7 @@ use crate::metadata::read_metadata;
 use crate::{RawBlock, SeekPoint, StreamInfo};
 use vynamp_decode_core::{
     ByteReader, CodecId, Demuxer, Error, Event, GaplessKind, LimitKind, Mode, Options, Packet,
-    Result, SeekTo, Source, Track, crc16, crc16_update, skip_id3v2,
+    Result, SeekTo, Source, Track, crc16, crc16_update, find_trailers, skip_id3v2,
 };
 
 /// Read size while streaming frames.
@@ -40,10 +40,6 @@ const MAX_EVENTS: usize = 4096;
 /// Silence per gap is capped at this many maximum-size blocks; beyond that the
 /// timeline jumps.
 const GAP_FILL_BLOCKS: u64 = 8;
-/// Trailers recognised after the audio, at most.
-const MAX_TRAILERS: usize = 16;
-/// Length of an ID3v1 tag at the end of a file.
-const ID3V1_LEN: usize = 128;
 
 /// Demuxer for native FLAC streams.
 ///
@@ -745,117 +741,6 @@ impl Located {
     }
 }
 
-/// Absolute position where the trailers after the audio start (`u64::MAX` = none).
-///
-/// Recognised, in any order and number: ID3v1, APEv2 (footer, optional header), an
-/// ID3v2 tag appended with a footer (`3DI`) and Lyrics3v2.
-fn find_trailer(src: &mut dyn Source, first_frame: u64) -> Result<u64> {
-    let Some(len) = src.len() else {
-        return Ok(u64::MAX);
-    };
-    let mut tail = Tail {
-        src,
-        first_frame,
-        len,
-    };
-    let mut end = len;
-    // Each pass strips one trailer; stop when none is recognised.
-    for _ in 0..MAX_TRAILERS {
-        let Some(size) = trailer_size(&mut tail, end)? else {
-            break;
-        };
-        end -= size;
-    }
-    Ok(if end < len { end } else { u64::MAX })
-}
-
-/// Random access to the end of a source.
-struct Tail<'a> {
-    src: &'a mut dyn Source,
-    first_frame: u64,
-    len: u64,
-}
-
-impl Tail<'_> {
-    /// Reads `n` bytes at `pos`, or `None` outside the audio data.
-    fn read_at(&mut self, pos: u64, n: usize) -> Result<Option<Vec<u8>>> {
-        if pos < self.first_frame || pos + n as u64 > self.len {
-            return Ok(None);
-        }
-        self.src.seek(pos)?;
-        let mut v = vec![0u8; n];
-        let mut got = 0;
-        while got < n {
-            match self.src.read(&mut v[got..])? {
-                0 => return Ok(None),
-                k => got += k,
-            }
-        }
-        Ok(Some(v))
-    }
-}
-
-/// Size of the trailer that ends at `end`, if one is recognised.
-fn trailer_size(tail: &mut Tail, end: u64) -> Result<Option<u64>> {
-    let room = end.saturating_sub(tail.first_frame);
-    // ID3v1: 128 bytes starting with "TAG".
-    if end >= ID3V1_LEN as u64
-        && let Some(tag) = tail.read_at(end - ID3V1_LEN as u64, 3)?
-        && &tag[..] == b"TAG"
-    {
-        return Ok(Some(ID3V1_LEN as u64));
-    }
-    // APEv2: a 32-byte footer, preceded by the items and followed by nothing.
-    if end >= 32
-        && let Some(f) = tail.read_at(end - 32, 32)?
-        && f.starts_with(b"APETAGEX")
-    {
-        let le = |i: usize| u32::from_le_bytes([f[i], f[i + 1], f[i + 2], f[i + 3]]);
-        let (version, size, flags) = (le(8), u64::from(le(12)), le(20));
-        // The size covers the items and the footer but not an optional header.
-        let total = size + if flags & 0x8000_0000 != 0 { 32 } else { 0 };
-        if (version == 1000 || version == 2000) && size >= 32 && total <= room {
-            return Ok(Some(total));
-        }
-    }
-    // Lyrics3v2: "LYRICSBEGIN" ... a six-digit size ... "LYRICS200". The size counts
-    // everything between the two markers' ends, so the tag is the size plus 15 bytes.
-    if end >= 15
-        && let Some(f) = tail.read_at(end - 15, 15)?
-        && &f[6..] == b"LYRICS200"
-        && f[..6].iter().all(u8::is_ascii_digit)
-    {
-        let size = f[..6]
-            .iter()
-            .fold(0u64, |a, &d| a * 10 + u64::from(d - b'0'));
-        let total = size + 15;
-        if size >= 11
-            && total <= room
-            && let Some(begin) = tail.read_at(end - total, 11)?
-            && &begin[..] == b"LYRICSBEGIN"
-        {
-            return Ok(Some(total));
-        }
-    }
-    // ID3v2 appended with a footer: "3DI", version, flags, synchsafe size. The size
-    // excludes the 10-byte header and the 10-byte footer.
-    if end >= 10
-        && let Some(f) = tail.read_at(end - 10, 10)?
-        && &f[..3] == b"3DI"
-        && f[6..].iter().all(|&b| b < 0x80)
-    {
-        let size = f[6..].iter().fold(0u64, |a, &b| a << 7 | u64::from(b));
-        let total = size + 20;
-        if total <= room
-            && let Some(head) = tail.read_at(end - total, 3)?
-            && &head[..] == b"ID3"
-        {
-            return Ok(Some(total));
-        }
-    }
-    Ok(None)
-}
-
 /// Opens a FLAC stream, parsing its metadata blocks.
 pub fn open_flac(mut src: Box<dyn Source>, opts: &Options) -> Result<FlacDemuxer> {
     opts.cancel.check()?;
@@ -892,7 +777,9 @@ pub fn open_flac(mut src: Box<dyn Source>, opts: &Options) -> Result<FlacDemuxer
         gapless: GaplessKind::Exact,
         codec_private,
     };
-    let audio_end = find_trailer(src.as_mut(), first_frame)?;
+    // `u64::MAX` = no trailer (or unknown length).
+    let (end, trailers) = find_trailers(src.as_mut(), first_frame)?;
+    let audio_end = if trailers.is_empty() { u64::MAX } else { end };
     src.seek(first_frame)?;
     let mut d = FlacDemuxer {
         src,
