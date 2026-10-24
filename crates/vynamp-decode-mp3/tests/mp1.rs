@@ -44,10 +44,9 @@ fn busy(crc: bool) -> L1Spec {
 }
 
 #[test]
-fn only_layer_one_is_available() {
+fn layer_three_and_foreign_codecs_are_unsupported() {
     let o = Options::default();
     for (codec, what) in [
-        (CodecId::Mp2, "mpeg layer II decoding"),
         (CodecId::Mp3, "mpeg layer III decoding"),
         (CodecId::Flac, "not an mpeg audio track"),
     ] {
@@ -56,9 +55,12 @@ fn only_layer_one_is_available() {
             other => panic!("{:?}", other.err()),
         }
     }
-    assert!(MpegDecoder::new(&track(CodecId::Mp1, 48000, 3), &o).is_err());
-    assert!(MpegDecoder::new(&track(CodecId::Mp1, 48000, 0), &o).is_err());
-    assert!(MpegDecoder::new(&track(CodecId::Mp1, 0, 2), &o).is_err());
+    for codec in [CodecId::Mp1, CodecId::Mp2] {
+        assert!(MpegDecoder::new(&track(codec.clone(), 48000, 2), &o).is_ok());
+        assert!(MpegDecoder::new(&track(codec.clone(), 48000, 3), &o).is_err());
+        assert!(MpegDecoder::new(&track(codec.clone(), 48000, 0), &o).is_err());
+        assert!(MpegDecoder::new(&track(codec, 0, 2), &o).is_err());
+    }
 }
 
 #[test]

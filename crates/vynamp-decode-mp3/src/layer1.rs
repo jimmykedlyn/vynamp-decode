@@ -18,26 +18,14 @@
 //! The CRC-16 covers header bytes 2 and 3 and the allocation field (not the scalefactors).
 
 use crate::synth::Synthesis;
-use std::sync::OnceLock;
+use crate::tables::{MAX_SAMPLES, scalefactors};
 use vynamp_decode_core::{BitReader, Error, Result, crc16_mpeg, crc16_update};
 use vynamp_decode_mpa::{ChannelMode, FrameHeader};
 
 /// Samples per channel in a Layer I frame.
 pub(crate) const SAMPLES: usize = 384;
 
-/// Scalefactors `2^(1 - i / 3)` by index (entry 63 is unused).
-fn scalefactors() -> &'static [f32; 64] {
-    static TABLE: OnceLock<[f32; 64]> = OnceLock::new();
-    TABLE.get_or_init(|| {
-        let mut t = [0.0f32; 64];
-        for (i, v) in t.iter_mut().enumerate() {
-            *v = 2f64.powf(1.0 - i as f64 / 3.0) as f32;
-        }
-        t
-    })
-}
-
-/// Decodes one Layer I frame into `pcm` (`SAMPLES` per channel).
+/// Decodes one Layer I frame into the first `SAMPLES` entries of each channel of `pcm`.
 ///
 /// `data` is the whole frame including its header; `base` is the absolute position of its
 /// first byte. The filterbank history in `synth` advances even if the frame turns out to be
@@ -47,7 +35,7 @@ pub(crate) fn decode_frame(
     header: &FrameHeader,
     base: u64,
     synth: &mut [Synthesis; 2],
-    pcm: &mut [[f32; SAMPLES]; 2],
+    pcm: &mut [[f32; MAX_SAMPLES]; 2],
 ) -> Result<()> {
     let nch = usize::from(header.channels());
     let bound = if header.channel_mode == ChannelMode::JointStereo {

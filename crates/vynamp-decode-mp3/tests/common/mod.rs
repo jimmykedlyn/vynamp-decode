@@ -206,3 +206,29 @@ pub fn random_l1(rng: &mut Rng, mode: u8, mode_ext: u8, crc: bool) -> L1Spec {
     }
     s
 }
+
+/// Contents of a committed fixture of this crate (`tests/fixtures/<name>`).
+pub fn fixture(name: &str) -> Vec<u8> {
+    let path = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
+    std::fs::read(&path).unwrap_or_else(|e| panic!("{path}: {e}"))
+}
+
+/// Splits a back-to-back MPEG audio stream into `(offset, frame)` pairs.
+pub fn split_frames(data: &[u8]) -> Vec<(u64, &[u8])> {
+    let mut frames = Vec::new();
+    let mut at = 0;
+    while let Some(head) = data.get(at..at + 4) {
+        let h = parse_header(head.try_into().unwrap()).expect("fixture header");
+        let end = (at + h.frame_len).min(data.len());
+        frames.push((at as u64, &data[at..end]));
+        at += h.frame_len;
+    }
+    frames
+}
+
+/// Interleaved little-endian f32 samples of a raw reference file.
+pub fn read_f32(name: &str) -> Vec<f32> {
+    let bytes = fixture(name);
+    let (words, _) = bytes.as_chunks::<4>();
+    words.iter().map(|b| f32::from_le_bytes(*b)).collect()
+}

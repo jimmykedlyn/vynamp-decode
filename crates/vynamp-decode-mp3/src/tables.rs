@@ -1,5 +1,22 @@
 //! Constant tables shared by the MPEG audio layers.
 
+use std::sync::OnceLock;
+
+/// Largest number of samples per channel in a Layer I/II frame.
+pub(crate) const MAX_SAMPLES: usize = 1152;
+
+/// Scalefactors `2^(1 - i / 3)` by index (entry 63 is unused), for Layers I and II.
+pub(crate) fn scalefactors() -> &'static [f32; 64] {
+    static TABLE: OnceLock<[f32; 64]> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut t = [0.0f32; 64];
+        for (i, v) in t.iter_mut().enumerate() {
+            *v = 2f64.powf(1.0 - i as f64 / 3.0) as f32;
+        }
+        t
+    })
+}
+
 /// The synthesis window `D[i]` of ISO/IEC 11172-3 (annex B, table 3-B.3) times 65536.
 ///
 /// The standard lists the 512 coefficients as multiples of 2^-16. The values were taken

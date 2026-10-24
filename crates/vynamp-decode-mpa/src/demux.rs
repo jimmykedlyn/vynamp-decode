@@ -54,6 +54,9 @@ const ANCHOR_STEP: u64 = 64;
 const MAX_ANCHORS: usize = 1 << 16;
 /// The MP3 decoder's own delay in samples (the polyphase filterbank plus the IMDCT overlap).
 const MP3_DECODER_DELAY: u32 = 529;
+/// The Layer I and II decoder's delay in samples: the polyphase synthesis filterbank alone
+/// (512 - 31), measured in the decoder tests.
+const MP12_DECODER_DELAY: u32 = 481;
 
 /// A frame accepted at some position.
 #[derive(Clone, Copy)]
@@ -676,8 +679,9 @@ impl MpaDemuxer {
 /// `frames - delay - padding` is the length of the encoded PCM. Gapless is exact only if the tag's padding is at least 529: a smaller
 /// padding cannot be taken from the decoder delay and saturates to 0 (the usual behaviour), so
 /// the trimmed length may then be up to 529 samples too long. Without a LAME tag a Layer
-/// III track has `delay = 529` and `gapless = Unknown`; Layer I and II tracks have `delay = 0`
-/// (their decoder delay is set where the decoder is) and `Unknown`.
+/// III track has `delay = 529` and `gapless = Unknown`; Layer I and II tracks have
+/// `delay = 481` (the synthesis filterbank delay; these layers carry no encoder delay
+/// metadata), `padding = 0` and `Unknown`.
 ///
 /// # Errors
 /// `Invalid { what: "mpeg sync" }` if no frame is found, limit errors, source errors.
@@ -754,7 +758,11 @@ pub fn open_mpa(mut src: Box<dyn Source>, opts: &Options) -> Result<MpaDemuxer> 
         opts.limits.check_frames(total)?;
         frames = Some(total);
     }
-    let mut delay = if h.layer == 3 { MP3_DECODER_DELAY } else { 0 };
+    let mut delay = if h.layer == 3 {
+        MP3_DECODER_DELAY
+    } else {
+        MP12_DECODER_DELAY
+    };
     let mut padding = 0;
     let mut gapless = GaplessKind::Unknown;
     if h.layer == 3

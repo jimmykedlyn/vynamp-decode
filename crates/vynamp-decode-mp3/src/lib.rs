@@ -2,8 +2,8 @@
 //!
 //! `MpegDecoder` decodes the packets of `vynamp-decode-mpa` (one whole frame per packet,
 //! header included) into planar `F32` audio scaled so that full scale is plus or minus 1.0.
-//! It dispatches on the track's codec: `Mp1` (Layer I) is implemented; `Mp2` and `Mp3` are
-//! reported as `Unsupported` by [`MpegDecoder::new`] until their layers land.
+//! It dispatches on the track's codec: `Mp1` (Layer I) and `Mp2` (Layer II) are implemented;
+//! `Mp3` is reported as `Unsupported` by [`MpegDecoder::new`] until its layer lands.
 //!
 //! The polyphase synthesis filterbank in the `synth` module is shared by all layers. Decoding
 //! allocates nothing per packet once the output buffer has grown to the frame size.
@@ -18,6 +18,7 @@
 #![warn(missing_docs)]
 
 mod layer1;
+mod layer2;
 mod synth;
 mod tables;
 
@@ -27,15 +28,15 @@ mod common;
 #[cfg(test)]
 mod reference;
 
-use layer1::SAMPLES as L1_SAMPLES;
 use synth::Synthesis;
+use tables::MAX_SAMPLES;
 use vynamp_decode_core::{
     AudioBuffer, CodecId, Decoder, Error, Event, Mode, Options, Packet, Result, SampleFormat, Track,
 };
 use vynamp_decode_mpa::parse_header;
 
 /// Largest number of frames (per channel) a packet can decode to.
-const MAX_FRAMES: u32 = 1152;
+const MAX_FRAMES: u32 = MAX_SAMPLES as u32;
 
 /// MPEG audio decoder for Layers I, II and III.
 pub struct MpegDecoder {
@@ -45,7 +46,7 @@ pub struct MpegDecoder {
     mode: Mode,
     max_frames: u64,
     synth: [Synthesis; 2],
-    pcm: Box<[[f32; L1_SAMPLES]; 2]>,
+    pcm: Box<[[f32; MAX_SAMPLES]; 2]>,
     events: Vec<Event>,
 }
 
@@ -53,13 +54,13 @@ impl MpegDecoder {
     /// Creates a decoder for an `Mp1`, `Mp2` or `Mp3` track.
     ///
     /// # Errors
-    /// `Unsupported` for another codec and for Layers II and III (not implemented yet);
+    /// `Unsupported` for another codec and for Layer III (not implemented yet);
     /// `Invalid` or `Limit` for a channel count or sample rate outside 1 or 2 channels and
     /// `opts.limits`.
     pub fn new(track: &Track, opts: &Options) -> Result<Self> {
         let layer = match track.codec {
             CodecId::Mp1 => 1,
-            CodecId::Mp2 => return Err(Error::Unsupported("mpeg layer II decoding")),
+            CodecId::Mp2 => 2,
             CodecId::Mp3 => return Err(Error::Unsupported("mpeg layer III decoding")),
             _ => return Err(Error::Unsupported("not an mpeg audio track")),
         };
@@ -78,7 +79,7 @@ impl MpegDecoder {
             mode: opts.mode,
             max_frames: opts.limits.max_frames,
             synth: [Synthesis::new(), Synthesis::new()],
-            pcm: Box::new([[0.0; L1_SAMPLES]; 2]),
+            pcm: Box::new([[0.0; MAX_SAMPLES]; 2]),
             events: Vec::new(),
         })
     }
@@ -123,15 +124,26 @@ impl MpegDecoder {
         {
             return Err(bad_header);
         }
-        // Layers II and III are rejected in `new`.
-        layer1::decode_frame(
-            &packet.data,
-            &header,
-            packet.offset,
-            &mut self.synth,
-            &mut self.pcm,
-        )?;
-        let frames = L1_SAMPLES;
+        // Layer III is rejected in `new`.
+        let frames = if self.layer == 1 {
+            layer1::decode_frame(
+                &packet.data,
+                &header,
+                packet.offset,
+                &mut self.synth,
+                &mut self.pcm,
+            )?;
+            layer1::SAMPLES
+        } else {
+            layer2::decode_frame(
+                &packet.data,
+                &header,
+                packet.offset,
+                &mut self.synth,
+                &mut self.pcm,
+            )?;
+            layer2::SAMPLES
+        };
         self.max_frames_check(packet.pts, frames)?;
         out.reset(SampleFormat::F32, self.channels, frames)?;
         for c in 0..usize::from(self.channels) {

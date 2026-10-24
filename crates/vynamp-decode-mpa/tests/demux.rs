@@ -254,9 +254,9 @@ fn lame_tag_gives_exact_gapless_numbers() {
                 assert_eq!(t.frames, None, "{}", fx.name);
                 assert_eq!(t.gapless, GaplessKind::Unknown, "{}", fx.name);
                 assert!(t.codec_private.is_empty());
-                // Layer III without a LAME tag: the decoder delay only. Layer I/II: the
-                // decoder task fixes the value.
-                let delay = if fx.codec == CodecId::Mp3 { 529 } else { 0 };
+                // Without a LAME tag, the decoder delay only: 529 for Layer III, 481 (the
+                // filterbank delay, 512 - 31) for Layers I and II.
+                let delay = if fx.codec == CodecId::Mp3 { 529 } else { 481 };
                 assert_eq!((t.delay, t.padding), (delay, 0), "{}", fx.name);
             }
         }
@@ -446,7 +446,7 @@ fn layer_one_synthetic_stream() {
     let t = d.tracks()[0].clone();
     assert_eq!(t.codec, CodecId::Mp1);
     assert_eq!((t.sample_rate, t.channels), (44100, 2));
-    assert_eq!((t.frames, t.delay, t.padding), (None, 0, 0));
+    assert_eq!((t.frames, t.delay, t.padding), (None, 481, 0));
     assert_eq!(t.gapless, GaplessKind::Unknown);
     let (pkts, r, _) = read_all(&mut d);
     assert_eq!(r, Ok(()));

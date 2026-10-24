@@ -106,3 +106,10 @@ impl RefAnalysis {
         s
     }
 }
+
+/// Layer II requantization of sample code `code` of a class with `steps` levels (3, 5, 9 or
+/// `2^bits - 1`) and scalefactor index `scf`: `(code - (steps - 1) / 2) * 2 / steps * scf`.
+pub(crate) fn dequant_levels(code: u32, steps: u32, scf: u8) -> f64 {
+    (f64::from(code) - f64::from(steps - 1) / 2.0) * 2.0 / f64::from(steps)
+        * 2f64.powf(1.0 - f64::from(scf) / 3.0)
+}
