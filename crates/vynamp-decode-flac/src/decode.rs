@@ -13,7 +13,10 @@ use vynamp_decode_core::{
 ///
 /// Samples are not rescaled: a stream of `n` bits per sample is stored at that depth
 /// in the buffer, which is `U8` up to 8 bits, `I16` up to 16, `I24` up to 24 and `I32`
-/// above. An empty packet is a Resilient silence packet of `packet.frames` frames.
+/// above. An empty packet is a Resilient silence packet of `packet.frames` frames
+/// (clamped to the maximum block size and checked against the frame limit). In
+/// `Mode::Resilient` a frame that fails to decode is replaced by silence of its length
+/// and reported as `Event::CorruptFrame`; in `Mode::Strict` the error is returned.
 /// The decoder trusts the demuxer's CRC-16 check and ignores bytes after the frame.
 ///
 /// When STREAMINFO carries a nonzero MD5 and total sample count, and the stream is decoded
@@ -28,6 +31,7 @@ pub struct FlacDecoder {
     /// One scratch plane per channel, `max_block` samples each.
     planes: Vec<Vec<i64>>,
     mode: Mode,
+    limits: Limits,
     md5: Md5Check,
     events: Vec<Event>,
 }
@@ -132,6 +136,7 @@ impl FlacDecoder {
         }
         Ok(Self {
             mode: opts.mode,
+            limits: opts.limits,
             md5: Md5Check {
                 active: verify,
                 started: false,
@@ -148,8 +153,13 @@ impl FlacDecoder {
         })
     }
 
-    fn silence(&self, frames: usize, out: &mut AudioBuffer) -> Result<()> {
-        out.reset(self.format, self.channels, frames)?;
+    /// Fills `out` with silence for `frames` frames starting at `pts`, after clamping
+    /// the count to the maximum block size and checking the frame limit.
+    fn silence(&self, pts: u64, frames: u32, out: &mut AudioBuffer) -> Result<()> {
+        let frames = frames.min(u32::from(self.info.max_block));
+        self.limits
+            .check_frames(pts.saturating_add(u64::from(frames)))?;
+        out.reset(self.format, self.channels, frames as usize)?;
         for c in 0..usize::from(self.channels) {
             match self.format {
                 SampleFormat::U8 => out.plane_u8_mut(c).map(|p| p.fill(128)),
@@ -208,7 +218,7 @@ impl FlacDecoder {
 
     fn decode_packet(&mut self, packet: &Packet, out: &mut AudioBuffer) -> Result<()> {
         if packet.data.is_empty() {
-            return self.silence(packet.frames as usize, out);
+            return self.silence(packet.pts, packet.frames, out);
         }
         let header =
             parse_frame_header(&packet.data, &self.info).map_err(|e| at(e, packet.offset))?;
@@ -302,7 +312,21 @@ impl Decoder for FlacDecoder {
         if result.is_err() {
             self.md5.active = false;
         }
-        result
+        match result {
+            // Resilient: a frame that cannot be decoded becomes silence of its length.
+            Err(Error::Invalid { .. }) if self.mode == Mode::Resilient => {
+                let frames = parse_frame_header(&packet.data, &self.info)
+                    .map_or(packet.frames, |h| h.block_size);
+                self.silence(packet.pts, frames, out)?;
+                self.events.push(Event::CorruptFrame {
+                    pts: packet.pts,
+                    offset: packet.offset,
+                    frames: out.frames() as u32,
+                });
+                Ok(())
+            }
+            other => other,
+        }
     }
 
     fn reset(&mut self) {
