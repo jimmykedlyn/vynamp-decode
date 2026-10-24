@@ -181,9 +181,15 @@ impl Reader {
         let to = self.demuxer.seek(self.track.id, target)?;
         self.decoder.reset();
         self.pos = to.frame;
+        // The position follows where the demuxer actually landed (a seek past the end
+        // lands at the end), mapped to the output timeline.
+        let landed = to
+            .frame
+            .saturating_add(to.preroll)
+            .saturating_sub(u64::from(self.track.delay));
         self.out_pos = match self.frames() {
-            Some(len) if self.enforce_end => frame.min(len),
-            _ => frame,
+            Some(len) if self.enforce_end => landed.min(len),
+            _ => landed,
         };
         self.skip_until = to
             .frame

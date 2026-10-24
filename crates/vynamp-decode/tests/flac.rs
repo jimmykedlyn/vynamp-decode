@@ -235,3 +235,15 @@ fn resilient_delivers_samples_beyond_a_too_small_declared_total() {
     end.unwrap();
     assert!(tail[0][..] == want[0][4000..]);
 }
+
+#[test]
+fn flac_seek_past_the_end_lands_at_the_declared_length() {
+    let mut r = reader(load("sine-16-stereo.flac"), Mode::Strict);
+    let len = r.frames().unwrap();
+    let mut buf = AudioBuffer::new();
+    for t in [len + 1000, u64::MAX, len] {
+        r.seek(t).unwrap();
+        assert_eq!(r.position(), len, "seek {t}");
+        assert!(!r.read(&mut buf).unwrap(), "seek {t}");
+    }
+}

@@ -69,6 +69,21 @@ mod pcm_decoding {
         }
     }
 
+    #[cfg(feature = "riff")]
+    #[test]
+    fn wav_seek_past_the_end_lands_at_the_declared_length() {
+        let bytes = vec![0u8; 2 * 10_000];
+        let file = wav(SPEC16, 44100, 1, &bytes, WavVariant::Riff);
+        let mut r = open(Box::new(VecSource::new(file)), Options::default()).unwrap();
+        let len = r.frames().unwrap();
+        let mut buf = AudioBuffer::new();
+        for t in [len + 1000, u64::MAX, len] {
+            r.seek(t).unwrap();
+            assert_eq!(r.position(), len, "seek {t}");
+            assert!(!r.read(&mut buf).unwrap(), "seek {t}");
+        }
+    }
+
     #[cfg(feature = "aiff")]
     #[test]
     fn aiff_decodes_bit_exact() {

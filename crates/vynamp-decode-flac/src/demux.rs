@@ -348,6 +348,9 @@ impl FlacDemuxer {
         if self.crc_ok(start, len) {
             return Ok(Located::new(len, true));
         }
+        // False-accept bound: a corrupt final frame of N bytes followed by junk is taken
+        // for a shorter valid frame with probability about N / 65536 (Strict still fails
+        // when the shortened frame is decoded).
         // Unrecognised bytes may follow the last frame: it ends at the shortest
         // prefix that holds its CRC-16.
         // A header-like boundary that failed its CRC-16 means more frames follow instead.
