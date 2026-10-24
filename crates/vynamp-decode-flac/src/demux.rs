@@ -295,8 +295,7 @@ impl FlacDemuxer {
         } else {
             (self.info.max_frame as usize)
                 .saturating_mul(2)
-                .max(MIN_CAP)
-                .min(HARD_CAP)
+                .clamp(MIN_CAP, HARD_CAP)
         };
         let strict = self.strict();
         let too_long = |first: Option<usize>| match first {
