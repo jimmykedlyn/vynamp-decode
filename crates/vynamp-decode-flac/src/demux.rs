@@ -29,6 +29,8 @@ const READ_CHUNK: usize = 64 * 1024;
 const PROBE_CHUNK: usize = 4 * 1024;
 /// Largest frame accepted when STREAMINFO does not give a maximum frame size.
 const HARD_CAP: usize = 16 << 20;
+/// Smallest frame size limit when STREAMINFO gives a maximum frame size.
+const MIN_CAP: usize = 64 * 1024;
 /// Header-like boundaries examined per frame before it is declared corrupt.
 const MAX_CANDIDATES: usize = 4;
 /// Bisection stops when the byte range is this small; a frame scan finishes the job.
@@ -286,10 +288,15 @@ impl FlacDemuxer {
     fn locate(&mut self, h: &FrameHeader) -> Result<Located> {
         let start = self.head;
         let hard = self.info.max_frame == 0;
+        // STREAMINFO's maximum frame size is a hint (encoders get it wrong): allow twice
+        // that, and at least 64 KiB, up to the hard cap.
         let cap = if hard {
             HARD_CAP
         } else {
-            self.info.max_frame as usize
+            (self.info.max_frame as usize)
+                .saturating_mul(2)
+                .max(MIN_CAP)
+                .min(HARD_CAP)
         };
         let strict = self.strict();
         let too_long = |first: Option<usize>| match first {

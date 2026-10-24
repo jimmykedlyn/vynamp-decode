@@ -155,7 +155,8 @@ pub(crate) fn parse_frame_header_with(
         }
         number
     } else {
-        if number >> 31 != 0 {
+        // Frame numbers have 31 bits; the legacy layout stores 36-bit sample numbers.
+        if number >> if legacy_vbr { 36 } else { 31 } != 0 {
             return Err(bad("flac coded number", 4));
         }
         if legacy_vbr {
@@ -440,5 +441,21 @@ mod tests {
             0xFF, 0xF8, 0xC9, 0x18, 0xFE, 0x82, 0x80, 0x80, 0x80, 0x80, 0x80,
         ]);
         assert!(parse_frame_header(&h, &info()).is_err());
+    }
+
+    #[test]
+    fn legacy_variable_headers_carry_36_bit_sample_numbers() {
+        // "Fixed" header with the 7-byte coded number 2^31 and the largest 36-bit one.
+        for (tail, want) in [
+            ([0xFE, 0x82, 0x80, 0x80, 0x80, 0x80, 0x80], 1u64 << 31),
+            ([0xFE, 0xBF, 0xBF, 0xBF, 0xBF, 0xBF, 0xBF], (1u64 << 36) - 1),
+        ] {
+            let mut v = vec![0xFF, 0xF8, 0xC9, 0x18];
+            v.extend(tail);
+            let h = seal(v);
+            assert_eq!(err(parse_frame_header(&h, &info())), "flac coded number");
+            let p = parse_frame_header_with(&h, &info(), true).unwrap();
+            assert_eq!(p.first_sample, want);
+        }
     }
 }
