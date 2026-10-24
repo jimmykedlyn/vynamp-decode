@@ -1047,8 +1047,11 @@ impl Demuxer for FlacDemuxer {
             return Err(Error::Unsupported("track"));
         }
         let total = self.info.total_samples;
-        let target = if total != 0 { frame.min(total) } else { frame };
-        if total != 0
+        // The declared total bounds seeks in Strict mode only: Resilient mode delivers
+        // samples beyond a wrong total, so it has to look.
+        let bounded = total != 0 && self.strict();
+        let target = if bounded { frame.min(total) } else { frame };
+        if bounded
             && target >= total
             && let Some(len) = self.src.len()
         {

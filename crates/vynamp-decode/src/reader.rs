@@ -21,8 +21,12 @@ pub struct Reader {
     pos: u64,
     /// Frames below this demuxer position are discarded.
     skip_until: u64,
-    /// Frames at or beyond this demuxer position are discarded (if known).
+    /// End of the declared length on the demuxer timeline (if known).
     end: Option<u64>,
+    /// Frames at or beyond `end` are discarded. Only done when the track declares
+    /// padding: a bare declared length (WAV, FLAC STREAMINFO) can be wrong, and
+    /// dropping real audio on its word would hide data.
+    enforce_end: bool,
     /// Next frame index on the trimmed output timeline.
     out_pos: u64,
     events: Vec<Event>,
@@ -63,6 +67,7 @@ impl Reader {
             pos: 0,
             skip_until: delay,
             end,
+            enforce_end: track.padding > 0,
             out_pos: 0,
             events: Vec::new(),
             events_dropped: 0,
@@ -93,6 +98,10 @@ impl Reader {
 
     /// Length of the trimmed output in frames (declared frames minus delay and
     /// padding, saturating), or `None` if the track length is unknown.
+    ///
+    /// The bound is enforced only for tracks that declare padding; otherwise the
+    /// declared length is a lower bound: a stream with more audio than it declared
+    /// (reported as `Event::Clamped` in `Mode::Resilient`) is delivered in full.
     pub fn frames(&self) -> Option<u64> {
         self.end
             .map(|e| e.saturating_sub(u64::from(self.track.delay)))
@@ -135,7 +144,7 @@ impl Reader {
     fn read_inner(&mut self, out: &mut AudioBuffer) -> Result<bool> {
         loop {
             self.cancel.check()?;
-            if self.end.is_some_and(|e| self.pos >= e) {
+            if self.end.is_some_and(|e| self.enforce_end && self.pos >= e) {
                 out.truncate_back(out.frames());
                 return Ok(false);
             }
@@ -153,6 +162,7 @@ impl Reader {
             let front = self.skip_until.saturating_sub(start).min(n);
             let back = self
                 .end
+                .filter(|_| self.enforce_end)
                 .map_or(0, |e| self.pos.saturating_sub(e))
                 .min(n - front);
             out.truncate_back(back as usize);
@@ -170,7 +180,10 @@ impl Reader {
         let to = self.demuxer.seek(self.track.id, target)?;
         self.decoder.reset();
         self.pos = to.frame;
-        self.out_pos = self.frames().map_or(frame, |len| frame.min(len));
+        self.out_pos = match self.frames() {
+            Some(len) if self.enforce_end => frame.min(len),
+            _ => frame,
+        };
         self.skip_until = to
             .frame
             .saturating_add(to.preroll)

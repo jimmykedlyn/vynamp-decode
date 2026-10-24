@@ -206,3 +206,32 @@ fn a_stream_without_its_leading_frames_is_rebased_and_decodes_strictly() {
     assert_eq!(got[1][..], want[1][origin as usize..]);
     assert_eq!(r.take_events(), vec![Event::TimelineRebased { origin }]);
 }
+
+#[test]
+fn resilient_delivers_samples_beyond_a_too_small_declared_total() {
+    let plain = load("sine-16-stereo.flac");
+    let (want, end) = drain(&mut reader(plain.clone(), Mode::Strict));
+    end.unwrap();
+    let mut bad = plain;
+    // STREAMINFO body starts at byte 8; total samples are the low nibble of body[13]
+    // and body[14..18].
+    bad[8 + 13] &= 0xF0;
+    bad[8 + 14..8 + 18].copy_from_slice(&2048u32.to_be_bytes());
+    let mut r = reader(bad.clone(), Mode::Resilient);
+    assert_eq!(r.frames(), Some(2048));
+    let (got, end) = drain(&mut r);
+    end.unwrap();
+    assert!(got == want, "every sample is delivered");
+    let events = r.take_events();
+    assert!(
+        events.iter().any(|e| matches!(e, Event::Clamped { .. })),
+        "{events:?}"
+    );
+    // Seeking is not clamped to the declared length either.
+    let mut r = reader(bad, Mode::Resilient);
+    r.seek(4000).unwrap();
+    assert_eq!(r.position(), 4000);
+    let (tail, end) = drain(&mut r);
+    end.unwrap();
+    assert!(tail[0][..] == want[0][4000..]);
+}
