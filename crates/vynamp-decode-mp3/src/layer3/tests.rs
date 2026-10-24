@@ -284,7 +284,7 @@ fn mpeg2_mono_long_and_mixed_8khz() {
     );
     assert_eq!(
         (out.gr[0][0].layout.n_long, out.gr[0][0].layout.n_short),
-        (3, 36)
+        (6, 30)
     );
 }
 

@@ -362,3 +362,38 @@ fn garbage_scalefactors_never_panic() {
         }
     }
 }
+
+#[test]
+fn mixed_long_bands_are_intensity_only_if_every_short_window_is_empty() {
+    // Right channel: zero in the long part (lines 0 to 35) but nonzero in window 1 of the
+    // first short band. The long part must not become intensity (ISO 11172-3, dist10): it is
+    // plain, or middle/side when that is on.
+    let mut rng = Rng(32);
+    let info = GranuleInfo {
+        mixed_block: true,
+        ..short()
+    };
+    let l0 = random_lines(&mut rng, 576);
+    let mut r0 = [0.0f32; 576];
+    let sf: Vec<u8> = (0..35).map(|e| (e % 6) as u8).collect();
+    let g0 = granule(V1, 44100, info, &[], 0);
+    let g1 = granule(V1, 44100, info, &sf, 0);
+    let (start, width) = bands(&g1)[9];
+    for v in &mut r0[start..start + width] {
+        *v = 2.0;
+    }
+    for ms in [false, true] {
+        let (mut l, mut r) = (l0, r0);
+        process(&mut l, &mut r, [&g0, &g1], stereo(V1, ms, true));
+        for i in 0..36 {
+            let (x, y) = (f64::from(l0[i]), f64::from(r0[i]));
+            if ms {
+                close(l[i], (x + y) * FRAC_1_SQRT_2, "long l");
+                close(r[i], (x - y) * FRAC_1_SQRT_2, "long r");
+            } else {
+                close(l[i], x, "long l");
+                close(r[i], y, "long r");
+            }
+        }
+    }
+}

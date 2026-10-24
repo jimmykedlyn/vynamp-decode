@@ -87,7 +87,7 @@ fn band_tables_cover_exactly_576_lines() {
             mixed.n_long,
             match (v, row) {
                 (V1, _) => 8,
-                (_, 1) => 3,
+                (_, 1) => 6,
                 _ => 6,
             }
         );
@@ -98,7 +98,8 @@ fn band_tables_cover_exactly_576_lines() {
             .map(|&w| usize::from(w))
             .sum();
         // The two lowest subbands (36 lines) are long at every rate.
-        assert_eq!(first, 36, "row {row}");
+        assert_eq!(first, if row == 1 { 72 } else { 36 }, "row {row}");
+        assert!(mixed.n_sf <= mixed.widths.len() - 3, "row {row}");
         // Entries that carry a scalefactor: 21 long, 36 short, 35 (MPEG-1) or 33 (MPEG-2/2.5)
         // mixed.
         assert_eq!(long.n_sf, 21);
@@ -361,4 +362,15 @@ fn reading_past_the_end_yields_zeros_without_panicking() {
     );
     assert_eq!(pos, 11 * 4 + 10 * 3);
     assert!(s.values.iter().all(|&v| v == 0));
+}
+
+#[test]
+fn the_8khz_mixed_layout_is_six_long_bands_then_the_short_bands_from_band_3() {
+    let mixed = layout(V25, 8000, &gi(2, true, 0));
+    let short = layout(V25, 8000, &gi(2, false, 0));
+    assert_eq!(&mixed.widths[..6], &[12; 6]);
+    // Short bands 3 to 12 follow unchanged (three entries per band).
+    assert_eq!(&mixed.widths[6..], &short.widths[9..]);
+    assert_eq!((mixed.n_long, mixed.n_short, mixed.n_sf), (6, 30, 33));
+    assert_eq!(mixed.mixed_region0, 72);
 }

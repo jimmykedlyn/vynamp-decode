@@ -387,3 +387,39 @@ fn granules_without_reservoir_data_are_silent() {
     assert!(pcm[0][..576].iter().all(|&v| v == 0.0));
     assert!(pcm[0][576..].iter().any(|&v| v != 0.0));
 }
+
+#[test]
+fn a_joint_stereo_granule_with_one_undecodable_channel_is_silent_in_both() {
+    // Granule 0 of the left channel is large and starts 100 bytes before the frame (no
+    // reservoir); the right channel's starts inside the frame. As plain stereo the right
+    // channel plays; as joint stereo the pair is incomplete, so both channels are silent.
+    let build = |mode: u8, ext: u8| {
+        let mut seed = 2024;
+        let big = |seed: &mut u32, bv: u16| {
+            granule(
+                loud(long_info(0, bv, [13, 15, 13], 6, 5)),
+                [30, 90],
+                vec![],
+                0,
+                seed,
+            )
+        };
+        let mut specs = vec![
+            vec![big(&mut seed, 150), big(&mut seed, 40)],
+            vec![big(&mut seed, 40), big(&mut seed, 40)],
+        ];
+        let (si, w) = assemble(&mut specs, [0, 0], 100);
+        frame_bytes(&v1_frame_header(mode, ext), &si, &w.bytes[100..])
+    };
+    let plain = decode_pcm(&build(0, 0));
+    assert!(plain[0][..576].iter().all(|&v| v == 0.0));
+    assert!(plain[1][..576].iter().any(|&v| v != 0.0));
+    for ext in [1, 2, 3] {
+        let joint = decode_pcm(&build(1, ext));
+        for (ch, plane) in joint.iter().enumerate() {
+            assert!(plane[..576].iter().all(|&v| v == 0.0), "ext {ext} ch{ch}");
+        }
+        // Granule 1 is complete again.
+        assert!(joint[0][576..].iter().any(|&v| v != 0.0));
+    }
+}

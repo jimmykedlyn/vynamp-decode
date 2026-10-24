@@ -174,3 +174,26 @@ and two interpretation details were taken from the public-domain (CC0) `minimp3`
 - LAME emits neither intensity stereo nor mixed blocks: both are checked on hand-assembled
   frames (intensity by linearity against a plain-stereo decode of the same left channel; all
   block types against an f64 reference chain).
+
+### Layer III fix round 1 (rulings)
+
+- **Mixed-block intensity bound.** The long bands of a mixed block may be intensity only if
+  every short window of the right channel is zero (ISO 11172-3 reference decoder and FFmpeg:
+  the non-zero search over the short windows gates the long loop); test
+  `mixed_long_bands_are_intensity_only_if_every_short_window_is_empty`.
+- **8 kHz (MPEG-2.5) mixed layout.** Follows FFmpeg (MPEG-2.5 is not an ISO standard):
+  six 12-line long bands (72 lines, requantized without subblock gain, not reordered; the
+  reordering starts at line 72), then the short bands from band 3. The IMDCT and alias
+  reduction still treat only the two lowest subbands as long. The old `minimp3`-derived row
+  (three long entries and an "entries 33-35 take 30-32" anomaly) is gone; test
+  `the_8khz_mixed_layout_is_six_long_bands_then_the_short_bands_from_band_3`.
+- **Intensity positions of slen 0 (M5).** Kept as in the ISO reference software (`is_max = 0`
+  makes every position of such a partition illegal). FFmpeg may differ (it derives its own
+  `sf_max`); we follow the ISO reference because it is the specification's own decoder, and
+  only streams from unusual encoders reach this case.
+- **Joint stereo with one undecodable channel.** If either channel of a granule needs preroll
+  while middle/side or intensity is on, both channels of that granule are silent (test
+  `a_joint_stereo_granule_with_one_undecodable_channel_is_silent_in_both`).
+- **Different block layouts in the two channels.** Intensity is skipped and full-range
+  middle/side is applied; FFmpeg uses the right channel's layout instead. Only streams with
+  encoder errors reach this.

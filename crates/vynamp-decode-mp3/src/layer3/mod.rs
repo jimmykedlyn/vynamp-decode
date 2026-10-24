@@ -242,6 +242,11 @@ impl Layer3Decoder {
                     self.xr[ch].fill(0.0);
                 }
             }
+            // A joint stereo granule needs both channels: with one undecodable the pair is
+            // silent.
+            if (tools.ms || tools.intensity) && present != [true, true] {
+                present = [false; 2];
+            }
             let mut used = [granules[0].used_lines, granules[1].used_lines];
             if (tools.ms || tools.intensity) && present == [true, true] {
                 let [l, r] = &mut *self.xr;

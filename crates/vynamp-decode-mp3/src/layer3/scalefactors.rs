@@ -18,9 +18,10 @@ pub(crate) struct Layout {
     /// per band and window: window `w` of the `b`-th short entry group is entry
     /// `n_long + 3 * b + w` (`b` counts from short band 3 in a mixed block).
     pub widths: &'static [u8],
-    /// Number of long band entries. These always cover lines 0 to 35 in a mixed block: 8
-    /// entries in MPEG-1, 6 in MPEG-2/2.5, and 3 at 8 kHz, whose width list (from `minimp3`)
-    /// starts its short entries after three 12-line long bands.
+    /// Number of long band entries: all 22 for long blocks; in a mixed block 8 entries in
+    /// MPEG-1 and 6 in MPEG-2/2.5, covering lines 0 to 35, except at 8 kHz where the six
+    /// 12-line long bands cover 72 lines (as FFmpeg does; the IMDCT and alias reduction still
+    /// treat only the two lowest subbands as long).
     pub n_long: usize,
     /// Number of short band entries (a multiple of 3).
     pub n_short: usize,
@@ -44,7 +45,6 @@ impl Layout {
                 let v1 = version == MpegVersion::V1;
                 let n_long = match (v1, row) {
                     (true, _) => 8,
-                    (false, 1) => 3,
                     (false, _) => 6,
                 };
                 Self {

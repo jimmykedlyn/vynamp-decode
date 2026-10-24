@@ -81,16 +81,17 @@ pub(super) static SFB_SHORT: [[u8; 39]; 8] = [
 
 /// Widths of the bands of a mixed block: the first 36 lines are long bands (8 bands in MPEG-1,
 /// 6 in MPEG-2 and 2.5), the rest short bands from band 3 on, three windows each. Same row
-/// order as [`SFB_LONG`]. The 8 kHz row follows the source and carries three more entries
-/// than the scalefactors cover (the last short band has none, like band 12 above).
+/// order as [`SFB_LONG`]. The 8 kHz row (MPEG-2.5, not in the ISO standard) follows FFmpeg, the
+/// de-facto reference: six 12-line long bands (72 lines) and then the short bands from band 3.
+/// (The `minimp3` row has three long bands and mislabelled short ones.)
 pub(super) static SFB_MIXED: [&[u8]; 8] = [
     &[
         6, 6, 6, 6, 6, 6, 6, 6, 6, 8, 8, 8, 10, 10, 10, 12, 12, 12, 14, 14, 14, 18, 18, 18, 24, 24,
         24, 30, 30, 30, 40, 40, 40, 18, 18, 18,
     ],
     &[
-        12, 12, 12, 4, 4, 4, 8, 8, 8, 12, 12, 12, 16, 16, 16, 20, 20, 20, 24, 24, 24, 28, 28, 28,
-        36, 36, 36, 2, 2, 2, 2, 2, 2, 2, 2, 2, 26, 26, 26,
+        12, 12, 12, 12, 12, 12, 12, 12, 12, 16, 16, 16, 20, 20, 20, 24, 24, 24, 28, 28, 28, 36, 36,
+        36, 2, 2, 2, 2, 2, 2, 2, 2, 2, 26, 26, 26,
     ],
     &[
         6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 8, 8, 8, 10, 10, 10, 14, 14, 14, 18, 18, 18, 26, 26,

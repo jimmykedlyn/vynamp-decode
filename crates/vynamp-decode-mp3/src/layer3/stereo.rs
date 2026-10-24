@@ -15,7 +15,8 @@
 //! band is an intensity band if it lies beyond the last band that has a nonzero line. Long
 //! blocks have one such bound; short blocks one per window (the bands of window `w` are every
 //! third entry from `n_long + w`); in a mixed block the long bands form one group and each
-//! window another. A right channel without any nonzero line is intensity from its first band
+//! window another, but the long bands are intensity only when every short window of the
+//! right channel is empty (ISO/IEC 11172-3 reference decoder). A right channel without any nonzero line is intensity from its first band
 //! on. In an intensity band the left channel's lines `x` are split: `L = x kl`, `R = x kr`.
 //!
 //! * MPEG-1: position `p` in 0 to 6, `kl = tan(p pi / 12) / (1 + tan(p pi / 12))`,
@@ -126,7 +127,13 @@ pub(super) fn process(l: &mut [f32; 576], r: &mut [f32; 576], g: [&Granule; 2], 
             break;
         }
         let end = end.min(used);
-        let beyond = last[group(e, l1.n_long)].is_none_or(|b| e > b);
+        let grp = group(e, l1.n_long);
+        let mut beyond = last[grp].is_none_or(|b| e > b);
+        // The long bands of a mixed block may be intensity only if no short window has a
+        // nonzero right line at all.
+        if grp == 0 && l1.n_short > 0 {
+            beyond &= last[1..].iter().all(Option::is_none);
+        }
         let mut action = Action::Plain;
         if beyond {
             let mut src = e;
