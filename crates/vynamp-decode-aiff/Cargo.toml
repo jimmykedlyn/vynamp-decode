@@ -1,0 +1,18 @@
+[package]
+name = "vynamp-decode-aiff"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "AIFF and AIFF-C demuxer for vynamp-decode"
+
+[dependencies]
+vynamp-decode-core = { path = "../vynamp-decode-core" }
+
+[dev-dependencies]
+vynamp-decode-testkit = { path = "../vynamp-decode-testkit" }
+vynamp-decode-pcm = { path = "../vynamp-decode-pcm" }
+
+[lints]
+workspace = true

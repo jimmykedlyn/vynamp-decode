@@ -3,49 +3,58 @@
 version = 4
 
 [[package]]
-name = "agulha"
+name = "vynamp-decode"
 version = "0.0.0"
 dependencies = [
- "agulha-aiff",
- "agulha-core",
- "agulha-pcm",
- "agulha-riff",
- "agulha-testkit",
+ "vynamp-decode-aiff",
+ "vynamp-decode-core",
+ "vynamp-decode-flac",
+ "vynamp-decode-pcm",
+ "vynamp-decode-riff",
+ "vynamp-decode-testkit",
 ]
 
 [[package]]
-name = "agulha-aiff"
+name = "vynamp-decode-aiff"
 version = "0.0.0"
 dependencies = [
- "agulha-core",
- "agulha-pcm",
- "agulha-testkit",
+ "vynamp-decode-core",
+ "vynamp-decode-pcm",
+ "vynamp-decode-testkit",
 ]
 
 [[package]]
-name = "agulha-core"
+name = "vynamp-decode-core"
 version = "0.0.0"
 
 [[package]]
-name = "agulha-pcm"
+name = "vynamp-decode-flac"
 version = "0.0.0"
 dependencies = [
- "agulha-core",
- "agulha-testkit",
+ "vynamp-decode-core",
+ "vynamp-decode-testkit",
 ]
 
 [[package]]
-name = "agulha-riff"
+name = "vynamp-decode-pcm"
 version = "0.0.0"
 dependencies = [
- "agulha-core",
- "agulha-pcm",
- "agulha-testkit",
+ "vynamp-decode-core",
+ "vynamp-decode-testkit",
 ]
 
 [[package]]
-name = "agulha-testkit"
+name = "vynamp-decode-riff"
 version = "0.0.0"
 dependencies = [
- "agulha-core",
+ "vynamp-decode-core",
+ "vynamp-decode-pcm",
+ "vynamp-decode-testkit",
+]
+
+[[package]]
+name = "vynamp-decode-testkit"
+version = "0.0.0"
+dependencies = [
+ "vynamp-decode-core",
 ]

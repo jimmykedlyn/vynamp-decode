@@ -1,6 +1,6 @@
 # AIFF / AIFF-C
 
-Public specifications consulted for `agulha-aiff`. No third-party code was
+Public specifications consulted for `vynamp-decode-aiff`. No third-party code was
 consulted or copied; the implementation was written from the format
 descriptions only.
 

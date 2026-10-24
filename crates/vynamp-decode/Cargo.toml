@@ -1,0 +1,28 @@
+[package]
+name = "vynamp-decode"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Dependency-free audio decoding: containers, codecs and a gapless-aware Reader"
+
+[features]
+default = ["riff", "aiff", "pcm", "flac"]
+riff = ["dep:vynamp-decode-riff"]
+aiff = ["dep:vynamp-decode-aiff"]
+pcm = ["dep:vynamp-decode-pcm"]
+flac = ["dep:vynamp-decode-flac"]
+
+[dependencies]
+vynamp-decode-core = { path = "../vynamp-decode-core" }
+vynamp-decode-riff = { path = "../vynamp-decode-riff", optional = true }
+vynamp-decode-aiff = { path = "../vynamp-decode-aiff", optional = true }
+vynamp-decode-pcm = { path = "../vynamp-decode-pcm", optional = true }
+vynamp-decode-flac = { path = "../vynamp-decode-flac", optional = true }
+
+[dev-dependencies]
+vynamp-decode-testkit = { path = "../vynamp-decode-testkit" }
+
+[lints]
+workspace = true

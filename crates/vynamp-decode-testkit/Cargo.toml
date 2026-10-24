@@ -1,0 +1,17 @@
+[package]
+name = "vynamp-decode-testkit"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+description = "Test-only helpers for vynamp-decode (SHA-256, signal generators, allocation counter)"
+
+[dependencies]
+vynamp-decode-core = { path = "../vynamp-decode-core" }
+
+# Exception to the workspace `unsafe_code = "forbid"`: only src/alloc.rs needs
+# `unsafe impl GlobalAlloc`. This crate is test-only and never published.
+[lints.rust]
+unsafe_code = "allow"

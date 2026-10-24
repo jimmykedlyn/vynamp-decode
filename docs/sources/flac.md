@@ -1,0 +1,25 @@
+# FLAC
+
+Public specification consulted for `vynamp-decode-flac`. No libFLAC, FFmpeg,
+Symphonia or other third-party code was consulted or copied; the implementation
+was written from the specification only.
+
+- IETF RFC 9639, "Free Lossless Audio Codec (FLAC)" (December 2024): the `fLaC`
+  stream marker, metadata block header (last-block flag, 7-bit type, 24-bit
+  length), STREAMINFO layout (16/16-bit block sizes, 24/24-bit frame sizes,
+  20-bit sample rate, 3-bit channels minus one, 5-bit bits per sample minus one,
+  36-bit total samples, 128-bit MD5), SEEKTABLE entries (18 bytes, placeholder
+  sample number 0xFFFFFFFFFFFFFFFF), and the block types PADDING, APPLICATION,
+  VORBIS_COMMENT, CUESHEET and PICTURE. Type 127 is forbidden and types 7 to
+  126 are reserved.
+- ID3v2 tags in front of the `fLaC` marker are tolerated (skipped by the core
+  `skip_id3v2`); they are not part of RFC 9639.
+- IETF CELLAR `flac-test-files` (https://github.com/ietf-wg-cellar/flac-test-files, commit
+  aa7b0c6cf32994c106ae517a08134c28a96ff5b2), by Martijn van Beurden, dedicated to the public
+  domain under CC0 1.0 Universal ("has waived all copyright and related or neighboring
+  rights"). A selection is redistributed unmodified in `tests/fixtures/flac-conformance/`
+  together with its `LICENSE.txt`; it is used as test data only.
+- RFC 9639 appendix B.1 ("Addition of Blocking Strategy Bit"): streams written before July 2007
+  do not flag variable block sizes in the frame header; decoders compare the minimum and
+  maximum block size in STREAMINFO. Section 4.1: block sizes below 16 are only allowed in the
+  last block.

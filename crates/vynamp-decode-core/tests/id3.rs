@@ -1,0 +1,48 @@
+use vynamp_decode_core::{Error, LimitKind, Limits, Source, VecSource, skip_id3v2};
+
+fn tag(size: u8, footer: bool) -> Vec<u8> {
+    let flags = if footer { 0x10 } else { 0 };
+    let mut v = vec![b'I', b'D', b'3', 4, 0, flags, 0, 0, 0, size];
+    v.extend(std::iter::repeat_n(0xAA, usize::from(size)));
+    if footer {
+        v.extend([0xBB; 10]);
+    }
+    v
+}
+
+#[test]
+fn no_tag_returns_zero() {
+    let mut s = VecSource::new(b"fLaC....".to_vec());
+    assert_eq!(skip_id3v2(&mut s, &Limits::default()).unwrap(), 0);
+    assert_eq!(s.position(), 0);
+}
+
+#[test]
+fn short_source_returns_zero() {
+    let mut s = VecSource::new(b"ID3".to_vec());
+    assert_eq!(skip_id3v2(&mut s, &Limits::default()).unwrap(), 0);
+}
+
+#[test]
+fn skips_stacked_tags_and_leaves_source_at_offset() {
+    let mut f = tag(5, false);
+    f.extend(tag(3, true));
+    let want = f.len() as u64;
+    f.extend(b"fLaC");
+    let mut s = VecSource::new(f);
+    assert_eq!(skip_id3v2(&mut s, &Limits::default()).unwrap(), want);
+    assert_eq!(s.position(), want);
+}
+
+#[test]
+fn oversized_tag_hits_metadata_limit() {
+    let mut s = VecSource::new(tag(100, false));
+    let limits = Limits {
+        max_metadata_bytes: 50,
+        ..Limits::default()
+    };
+    assert_eq!(
+        skip_id3v2(&mut s, &limits),
+        Err(Error::Limit(LimitKind::Metadata))
+    );
+}

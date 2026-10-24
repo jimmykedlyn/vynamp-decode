@@ -1,6 +1,6 @@
 # RIFF / WAVE / RF64 / BW64 / Wave64
 
-Public specifications consulted for `agulha-riff`. No third-party code was
+Public specifications consulted for `vynamp-decode-riff`. No third-party code was
 consulted or copied; the implementation was written from the format
 descriptions only.
 
