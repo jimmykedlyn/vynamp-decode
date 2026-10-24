@@ -1,0 +1,18 @@
+[package]
+name = "vynamp-decode-mp3"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "MPEG audio (Layer I/II/III) decoder for vynamp-decode"
+
+[dependencies]
+vynamp-decode-core = { path = "../vynamp-decode-core" }
+vynamp-decode-mpa = { path = "../vynamp-decode-mpa" }
+
+[dev-dependencies]
+vynamp-decode-testkit = { path = "../vynamp-decode-testkit" }
+
+[lints]
+workspace = true

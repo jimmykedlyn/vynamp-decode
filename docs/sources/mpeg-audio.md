@@ -50,3 +50,36 @@ dev-time tool: it writes the fixtures (`tools/fixtures/generate-mpeg-dev.ps1`) a
 - Gapless is exact only if the LAME padding is at least 529; a smaller one saturates to 0.
 - ID3v2, ID3v1, APEv2 and Lyrics3v2 tags are handled by the core `skip_id3v2` and
   `find_trailers`.
+
+## Decoder: synthesis filterbank and Layer I (`vynamp-decode-mp3`)
+
+- Polyphase synthesis (ISO/IEC 11172-3 annex C, as publicly described): matrixing
+  `V[i] = sum_k cos((16 + i)(2k + 1) pi / 64) S[k]`, the 1024-entry `V` history, the
+  `U` vector built from 32-entry halves of every 64-entry block, and
+  `out[j] = sum D[j + 32 m] U[j + 32 m]`. The fast form used here is derived from the cosine
+  symmetries (see `synth.rs`), not copied.
+- **Synthesis window `D[i]` (512 coefficients, multiples of 2^-16).** Taken from the
+  public-domain (CC0) `minimp3` source, <https://github.com/lieff/minimp3> (`minimp3.h`),
+  whose licence header reads: "To the extent possible under law, the author(s) have dedicated
+  all copyright and related and neighboring rights to this software to the public domain
+  worldwide ... See <http://creativecommons.org/publicdomain/zero/1.0/>" (checked on
+  2026-10-24). Only the numeric constants were used: `minimp3` stores 240 window values in a
+  layout folded for SIMD plus 16 constants in its two output pairs; a throw-away script
+  (not committed) ported its scalar synthesis stage and solved, by least squares over random
+  input, for the coefficient of every `U` entry of the definition above, which yields `D[i]`
+  in the standard's order. The integers came out exact (the largest deviation from an integer
+  was 1e-3 after scaling `D[256]` to 75038). Eight entries (`D[16 + 64 n]`) multiply a
+  matrixing output that is identically zero, so the solve cannot see them; they are set by the
+  window's antisymmetry. The result is checked in `tables.rs`/`synth.rs` tests: antisymmetry,
+  `D[256] = 75038`, and the Layer I delay test, which passes a signal through the standard's
+  analysis filterbank (window `C = D / 32`) and this synthesis and recovers it with the
+  expected 481-sample delay and an error at the filter's known ripple level.
+- Layer I frame layout (allocation, scalefactor index `2^(1 - i / 3)`, sample requantization
+  `(s - 2^(n-1) + 1) * 2 / (2^n - 1) * scalefactor`, joint stereo `bound = 4 + 4 * mode_ext`
+  with one shared sample above it, CRC over header bytes 2 and 3 plus the allocation field), from the
+  public description of the standard.
+- **Layer I test material.** No Layer I encoder is available (FFmpeg has none) and no Layer I
+  stream with a clear permissive licence was found (a search turned up only the ISO conformance
+  streams, whose licence is unstated, which are therefore not used). Layer I is verified
+  against an independent `f64` implementation of the definition on hand-assembled frames
+  and the delay test above; its verification level stays **Experimental**.

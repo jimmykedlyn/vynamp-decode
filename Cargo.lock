@@ -36,6 +36,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "vynamp-decode-mp3"
+version = "0.0.0"
+dependencies = [
+ "vynamp-decode-core",
+ "vynamp-decode-mpa",
+ "vynamp-decode-testkit",
+]
+
+[[package]]
 name = "vynamp-decode-mpa"
 version = "0.0.0"
 dependencies = [
