@@ -1356,3 +1356,55 @@ fn undersized_non_final_blocks_are_invalid_in_strict_only() {
     let short = syn_stream(4096, 4096, 0, 4096 + 5, &fixed_frames(1, 5));
     assert_eq!(clean(&short).len(), 2);
 }
+
+// ------------------------------------------------------- final fix wave
+
+#[test]
+fn a_huge_gap_is_filled_in_bounded_work_and_reported_once() {
+    let a = syn_frame(true, 0, 4096, &payload(1, 100));
+    let b = syn_frame(true, 1 << 34, 4096, &payload(2, 100));
+    let file = syn_stream(4096, 4096, 0, 0, &[a, b]);
+    let (probe, bytes, _) = Probe::new(file.clone());
+    let mut d = open_flac(Box::new(probe), &resilient()).unwrap();
+    let (got, r, ev) = read_all(&mut d);
+    assert_eq!(r, Ok(()));
+    // Frame, at most 8 chunks of silence (8 x max_block frames), frame.
+    assert!(got.len() <= 10, "{} packets", got.len());
+    let silent: u64 = got
+        .iter()
+        .filter(|p| p.data.is_empty())
+        .map(|p| u64::from(p.frames))
+        .sum();
+    assert_eq!(silent, 8 * 4096);
+    assert_eq!(got.last().unwrap().pts, 1 << 34);
+    assert_eq!(
+        ev,
+        vec![Event::CorruptFrame {
+            pts: 4096,
+            offset: got[1].offset,
+            frames: u32::MAX,
+        }]
+    );
+    // The far frame is located once, not once per silence chunk.
+    assert!(bytes.load(Ordering::SeqCst) <= 2 * file.len() as u64);
+}
+
+#[test]
+fn a_gap_within_the_cap_is_one_event_with_the_full_length() {
+    let frames = fixed_frames(6, 0);
+    let mut kept = frames.clone();
+    kept.remove(2);
+    kept.remove(2);
+    let mut d = open(syn_stream(4096, 4096, 0, 6 * 4096, &kept), &resilient());
+    let (got, r, ev) = read_all(&mut d);
+    assert_eq!(r, Ok(()));
+    assert_eq!(got.len(), 6);
+    assert_eq!(
+        ev,
+        vec![Event::CorruptFrame {
+            pts: 2 * 4096,
+            offset: got[2].offset,
+            frames: 2 * 4096,
+        }]
+    );
+}

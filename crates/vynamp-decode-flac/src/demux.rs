@@ -31,6 +31,9 @@ const MAX_CANDIDATES: usize = 4;
 const BISECT_MIN: u64 = 4096;
 /// Queued events beyond this many are dropped.
 const MAX_EVENTS: usize = 4096;
+/// Silence per gap is capped at this many maximum-size blocks; beyond that the
+/// timeline jumps.
+const GAP_FILL_BLOCKS: u64 = 8;
 /// Length of an ID3v1 tag at the end of a file.
 const ID3V1_LEN: usize = 128;
 
@@ -73,6 +76,10 @@ pub struct FlacDemuxer {
     clamped: bool,
     /// Where Resilient mode started skipping unparseable bytes.
     skipped: Option<u64>,
+    /// Silence still owed for the gap in front of the frame at `head`.
+    fill_left: u64,
+    /// Sample number of that frame: the timeline continues there once the fill is done.
+    fill_resume: u64,
     events: Vec<Event>,
 }
 
@@ -119,6 +126,7 @@ impl FlacDemuxer {
         self.buf_off = off;
         self.eof = false;
         self.last_end = off;
+        self.fill_left = 0;
         Ok(())
     }
 
@@ -366,18 +374,34 @@ impl FlacDemuxer {
         Ok(false)
     }
 
-    /// Resilient: a silence packet.
+    /// Resilient: a silence packet, reported with a `CorruptFrame` event.
     fn silence(&mut self, out: &mut Packet, pts: u64, frames: u32, offset: u64) {
-        out.track = 0;
-        out.pts = pts;
-        out.frames = frames;
-        out.offset = offset;
-        out.data.clear();
+        self.silence_packet(out, pts, frames, offset);
         self.event(Event::CorruptFrame {
             pts,
             offset,
             frames,
         });
+    }
+
+    fn silence_packet(&self, out: &mut Packet, pts: u64, frames: u32, offset: u64) {
+        out.track = 0;
+        out.pts = pts;
+        out.frames = frames;
+        out.offset = offset;
+        out.data.clear();
+    }
+
+    /// The next chunk of the silence owed for a gap (the gap was reported when it was found).
+    fn fill_chunk(&mut self, out: &mut Packet) {
+        let n = self.fill_left.min(u64::from(self.info.max_block)) as u32;
+        let (pts, at) = (self.next_pts, self.last_end);
+        self.silence_packet(out, pts, n, at);
+        self.fill_left -= u64::from(n);
+        self.next_pts += u64::from(n);
+        if self.fill_left == 0 {
+            self.next_pts = self.fill_resume;
+        }
     }
 
     /// First frame header at or after `from` and before `until`, found by sync search.
@@ -681,6 +705,8 @@ pub fn open_flac(mut src: Box<dyn Source>, opts: &Options) -> Result<FlacDemuxer
         legacy_vbr: false,
         clamped: false,
         skipped: None,
+        fill_left: 0,
+        fill_resume: 0,
         events: Vec::new(),
     };
     d.detect_legacy_vbr()?;
@@ -696,6 +722,10 @@ impl Demuxer for FlacDemuxer {
         self.opts.cancel.check()?;
         if self.done {
             return Ok(false);
+        }
+        if self.fill_left > 0 {
+            self.fill_chunk(out);
+            return Ok(true);
         }
         loop {
             let Some(h) = self.sync_head()? else {
@@ -720,32 +750,30 @@ impl Demuxer for FlacDemuxer {
                 }
                 self.blocking.get_or_insert(h.blocking_variable);
                 if h.first_sample > self.next_pts {
-                    // Samples are missing before this frame: fill them with silence.
+                    // Samples are missing before this frame: fill them with silence,
+                    // up to a plausibility cap, then jump the timeline. The gap is
+                    // reported once; the chunks are produced without locating the
+                    // frame again.
                     let gap = h.first_sample - self.next_pts;
                     let total = self.info.total_samples;
                     let mut room = self.opts.limits.max_frames.saturating_sub(self.next_pts);
                     if total != 0 {
                         room = room.min(total.saturating_sub(self.next_pts));
                     }
-                    let fill = gap.min(room);
-                    let (pts, at) = (self.next_pts, self.last_end);
+                    let cap = GAP_FILL_BLOCKS * u64::from(self.info.max_block);
+                    let fill = gap.min(room).min(cap);
+                    self.event(Event::CorruptFrame {
+                        pts: self.next_pts,
+                        offset: self.last_end,
+                        frames: u32::try_from(gap).unwrap_or(u32::MAX),
+                    });
                     if fill == 0 {
-                        // Nothing more may be filled: report the loss and jump the timeline.
-                        self.event(Event::CorruptFrame {
-                            pts,
-                            offset: at,
-                            frames: u32::try_from(gap).unwrap_or(u32::MAX),
-                        });
                         self.next_pts = h.first_sample;
                         continue;
                     }
-                    let n = fill.min(u64::from(self.info.max_block)) as u32;
-                    self.silence(out, pts, n, at);
-                    self.next_pts += u64::from(n);
-                    if fill < gap && u64::from(n) == fill {
-                        // More was lost than the limits allow to fill: jump the timeline.
-                        self.next_pts = h.first_sample;
-                    }
+                    self.fill_left = fill;
+                    self.fill_resume = h.first_sample;
+                    self.fill_chunk(out);
                     return Ok(true);
                 }
                 // The frame lies before the current position: drop it.
