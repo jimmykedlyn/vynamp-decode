@@ -90,6 +90,8 @@ pub struct FlacDemuxer {
     /// Sample number of that frame: the timeline continues there once the fill is done.
     fill_resume: u64,
     events: Vec<Event>,
+    /// Events that did not fit in `events`.
+    events_dropped: u64,
 }
 
 impl FlacDemuxer {
@@ -124,6 +126,8 @@ impl FlacDemuxer {
     fn event(&mut self, e: Event) {
         if self.events.len() < MAX_EVENTS {
             self.events.push(e);
+        } else {
+            self.events_dropped += 1;
         }
     }
 
@@ -497,11 +501,15 @@ impl FlacDemuxer {
     }
 
     /// Byte offset and first sample of a frame at or before `target`, found by bisection.
-    fn bisect(&mut self, target: u64) -> Result<(u64, u64)> {
+    ///
+    /// The search starts in `[lo, hi)`, where `lo` is a frame start with first sample
+    /// `lo_pts`; `hi` is the file length unless a bound is known.
+    fn bisect(&mut self, target: u64, lo: u64, lo_pts: u64, hi: Option<u64>) -> Result<(u64, u64)> {
         let Some(len) = self.src.len() else {
-            return Ok((self.first_frame, 0));
+            return Ok((lo, lo_pts));
         };
-        let (mut lo, mut lo_pts, mut hi) = (self.first_frame, 0u64, len);
+        let hi = hi.map_or(len, |h| h.min(len));
+        let (mut lo, mut lo_pts, mut hi) = (lo, lo_pts, hi.max(lo));
         for _ in 0..64 {
             self.opts.cancel.check()?;
             if hi.saturating_sub(lo) <= BISECT_MIN {
@@ -545,10 +553,18 @@ impl FlacDemuxer {
                 .header_at(0)?
                 .is_some_and(|h| h.first_sample == p.sample);
             if ok {
-                return Ok((off, p.sample));
+                // The entry is only a lower bound: the next one (if any) bounds the
+                // search from above, and bisection finds the frame in between.
+                let next = self
+                    .seek_points
+                    .iter()
+                    .filter(|q| q.sample > target)
+                    .min_by_key(|q| q.sample)
+                    .and_then(|q| self.first_frame.checked_add(q.offset));
+                return self.bisect(target, off, p.sample, next);
             }
         }
-        self.bisect(target)
+        self.bisect(target, self.first_frame, 0, None)
     }
 
     /// Scans frames from `off` (whose first sample is `pts`) to the one holding
@@ -890,6 +906,7 @@ pub fn open_flac(mut src: Box<dyn Source>, opts: &Options) -> Result<FlacDemuxer
         fill_left: 0,
         fill_resume: 0,
         events: Vec::new(),
+        events_dropped: 0,
     };
     d.detect_legacy_vbr()?;
     d.detect_origin()?;
@@ -1074,5 +1091,9 @@ impl Demuxer for FlacDemuxer {
 
     fn drain_events(&mut self, out: &mut Vec<Event>) {
         out.append(&mut self.events);
+    }
+
+    fn take_events_dropped(&mut self) -> u64 {
+        std::mem::take(&mut self.events_dropped)
     }
 }

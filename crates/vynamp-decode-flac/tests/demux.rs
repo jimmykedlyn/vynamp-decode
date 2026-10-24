@@ -1590,7 +1590,7 @@ fn a_short_final_frame_may_be_followed_by_trailers_and_junk() {
 fn a_seek_discards_pending_skipped_byte_reports() {
     // Frame 1 is far larger than the STREAMINFO hint, so its body is skipped as junk
     // while the seek scans past it; that must not surface as an event afterwards.
-    let frames = vec![
+    let frames = [
         syn_frame(false, 0, 4096, &payload(1, 100)),
         syn_frame(false, 1, 4096, &payload(2, 70_000)),
         syn_frame(false, 2, 4096, &payload(3, 100)),
@@ -1620,4 +1620,53 @@ fn a_seek_discards_pending_skipped_byte_reports() {
     let mut ev = Vec::new();
     d.drain_events(&mut ev);
     assert!(ev.is_empty(), "{ev:?}");
+}
+
+#[test]
+fn a_sparse_seektable_only_bounds_the_bisection() {
+    let file = syn_stream_big();
+    let len = file.len() as u64;
+    // Only the entry for sample 0 survives: seeks near the end must still bisect.
+    let sparse = with_seektable(&file, 100_000, 0);
+    let (probe, bytes, _) = Probe::new(sparse);
+    let mut d = open_flac(Box::new(probe), &strict()).unwrap();
+    let before = bytes.load(Ordering::SeqCst);
+    let t = 3999 * 4096 + 17;
+    let got = d.seek(0, t).unwrap();
+    assert_eq!((got.frame, got.preroll), (3999 * 4096, 17));
+    assert!(
+        bytes.load(Ordering::SeqCst) - before < len / 4,
+        "{} of {len}",
+        bytes.load(Ordering::SeqCst) - before
+    );
+    // The next entry bounds the search from above: a seek between two entries is exact.
+    let table = with_seektable(&file, 1000, 0);
+    let (probe, bytes, _) = Probe::new(table);
+    let mut d = open_flac(Box::new(probe), &strict()).unwrap();
+    let before = bytes.load(Ordering::SeqCst);
+    let t = 2500 * 4096 + 3;
+    let got = d.seek(0, t).unwrap();
+    assert_eq!((got.frame, got.preroll), (2500 * 4096, 3));
+    assert!(bytes.load(Ordering::SeqCst) - before < len / 8);
+}
+
+#[test]
+fn demuxer_events_beyond_the_queue_capacity_are_counted() {
+    // 4200 frames, each failing its CRC-16: one CorruptFrame event per frame.
+    let frames: Vec<Vec<u8>> = (0..4200u64)
+        .map(|i| {
+            let mut f = syn_frame(false, i, 4096, &payload(i, 3));
+            let n = f.len();
+            f[n - 1] ^= 0xFF;
+            f
+        })
+        .collect();
+    let file = syn_stream(4096, 4096, 0, 4200 * 4096, &frames);
+    let mut d = open(file, &resilient());
+    let (got, r, ev) = read_all(&mut d);
+    assert_eq!(r, Ok(()));
+    assert_eq!(got.len(), 4200);
+    assert_eq!(ev.len(), 4096);
+    assert_eq!(d.take_events_dropped(), 4200 - 4096);
+    assert_eq!(d.take_events_dropped(), 0);
 }

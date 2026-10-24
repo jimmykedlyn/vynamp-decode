@@ -83,6 +83,7 @@ impl Reader {
         let mut fresh = Vec::new();
         self.demuxer.drain_events(&mut fresh);
         self.decoder.drain_events(&mut fresh);
+        self.events_dropped += self.demuxer.take_events_dropped();
         let room = MAX_EVENTS.saturating_sub(self.events.len());
         if fresh.len() > room {
             self.events_dropped += (fresh.len() - room) as u64;

@@ -360,6 +360,8 @@ mod pcm_decoding {
         tracks: Vec<Track>,
         pending: usize,
         fail: bool,
+        /// Events the demuxer reports as dropped on its own queue.
+        dropped: u64,
     }
 
     impl Demuxer for Noisy {
@@ -384,6 +386,9 @@ mod pcm_decoding {
             out.extend((0..self.pending).map(|_| Event::ChecksumMismatch { what: "noisy" }));
             self.pending = 0;
         }
+        fn take_events_dropped(&mut self) -> u64 {
+            std::mem::take(&mut self.dropped)
+        }
     }
 
     fn noisy(pending: usize, fail: bool) -> Result<Box<dyn Demuxer>> {
@@ -393,6 +398,7 @@ mod pcm_decoding {
             tracks: s.tracks,
             pending,
             fail,
+            dropped: if pending == 7 { 123 } else { 0 },
         }))
     }
 
@@ -420,11 +426,20 @@ mod pcm_decoding {
         open: |_, _| noisy(5000, false),
     };
 
+    static NOISY_DROPS: ContainerDescriptor = ContainerDescriptor {
+        name: "noisy-drops",
+        extensions: &[],
+        verification: Verification::Experimental,
+        probe: |h| if h.starts_with(b"NDR") { 50 } else { 0 },
+        open: |_, _| noisy(7, false),
+    };
+
     fn noisy_reader(magic: &'static [u8]) -> Reader {
         let mut reg = Registry::new();
         reg.add_container(&NOISY_END);
         reg.add_container(&NOISY_ERR);
         reg.add_container(&NOISY_MANY);
+        reg.add_container(&NOISY_DROPS);
         reg.add_codec(&GAP_CODEC);
         Reader::open_with(
             &reg,
@@ -455,6 +470,18 @@ mod pcm_decoding {
         assert_eq!(r.take_events().len(), 4096);
         assert_eq!(r.events_dropped(), 0);
         assert!(r.take_events().is_empty());
+    }
+
+    #[test]
+    fn demuxer_queue_drops_are_counted_by_the_reader() {
+        let mut r = noisy_reader(b"NDRxxxxxxxx");
+        // 7 events fit; the demuxer says it dropped 123 more.
+        assert_eq!(r.take_events().len(), 7);
+        assert_eq!(r.events_dropped(), 0);
+        let mut r = noisy_reader(b"NDRxxxxxxxx");
+        assert_eq!(r.events_dropped(), 123);
+        assert_eq!(r.take_events().len(), 7);
+        assert_eq!(r.events_dropped(), 0);
     }
 
     #[test]

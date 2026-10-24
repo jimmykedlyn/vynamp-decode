@@ -21,6 +21,11 @@ pub trait Demuxer: Send {
     fn seek(&mut self, track: u32, frame: u64) -> Result<SeekTo>;
     /// Moves pending diagnostic events into `out`. The default reports none.
     fn drain_events(&mut self, _out: &mut Vec<Event>) {}
+    /// Returns, and resets, the number of events dropped because the demuxer's own
+    /// queue was full. The default drops none.
+    fn take_events_dropped(&mut self) -> u64 {
+        0
+    }
 }
 
 /// Decodes packets into audio.
