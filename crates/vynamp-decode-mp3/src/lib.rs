@@ -19,6 +19,9 @@
 
 mod layer1;
 mod layer2;
+// Wired into `MpegDecoder` by the synthesis path; until then only the tests use it.
+#[allow(dead_code)]
+mod layer3;
 mod synth;
 mod tables;
 
