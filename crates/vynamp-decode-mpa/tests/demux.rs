@@ -456,17 +456,17 @@ fn layer_one_synthetic_stream() {
             .enumerate()
             .all(|(i, p)| p.pts == i as u64 * 384 && p.frames == 384)
     );
-    // One frame of preroll for Layer I.
+    // Two frames of preroll for Layer I (12 slots per frame, 15 slots of filterbank history).
     assert_eq!(
         d.seek(0, 5 * 384 + 7).unwrap(),
         SeekTo {
-            frame: 4 * 384,
-            preroll: 384 + 7
+            frame: 3 * 384,
+            preroll: 2 * 384 + 7
         }
     );
     let mut p = Packet::default();
     assert!(d.next_packet(&mut p).unwrap());
-    assert_eq!((p.pts, p.offset), (4 * 384, pkts[4].offset));
+    assert_eq!((p.pts, p.offset), (3 * 384, pkts[3].offset));
 }
 
 /// Rewrites the bitrate index of every frame (the Info frame included) to 0 = free format.
@@ -527,10 +527,11 @@ fn check_seeks(name: &str, data: &[u8], opts: &Options) {
     };
     let n = pkts.len() as u64;
     let spf = u64::from(pkts[0].frames);
-    let layer3 = parse_header(pkts[0].data[..4].try_into().unwrap())
+    let layer = parse_header(pkts[0].data[..4].try_into().unwrap())
         .unwrap()
-        .layer
-        == 3;
+        .layer;
+    let layer3 = layer == 3;
+    let other_preroll = if layer == 1 { 2 } else { 1 };
     let mut targets: Vec<u64> = (0..n).step_by(10).map(|i| i * spf + i % 7).collect();
     targets.push((n - 1) * spf);
     targets.push(n * spf - 1);
@@ -547,7 +548,7 @@ fn check_seeks(name: &str, data: &[u8], opts: &Options) {
             - if layer3 {
                 reservoir_preroll(&pkts, idx)
             } else {
-                1.min(idx)
+                other_preroll.min(idx)
             };
         let to = d.seek(0, t).unwrap();
         assert_eq!(
@@ -1217,11 +1218,22 @@ fn with_tag(frames: u32, delay: u16, padding: u16) -> Vec<u8> {
 
 #[test]
 fn a_declared_frame_count_may_count_the_info_frame() {
-    // The fixture has 126 frames. Some encoders count the Info frame too (127).
+    // The fixture has 126 frames. Some encoders count the Info frame too (127); such a writer
+    // is not LAME, so its tag is not trusted (a trusted tag makes the count exact).
     for declared in [126, 127] {
         for opts in [strict(), resilient()] {
-            let mut d = open(with_tag(declared, 576, 1000), &opts);
-            assert_eq!(d.tracks()[0].gapless, GaplessKind::FromMetadata);
+            let data = if declared == 126 {
+                with_tag(declared, 576, 1000)
+            } else {
+                with_untrusted_tag(declared)
+            };
+            let mut d = open(data, &opts);
+            let want = if declared == 126 {
+                GaplessKind::FromMetadata
+            } else {
+                GaplessKind::Unknown
+            };
+            assert_eq!(d.tracks()[0].gapless, want);
             let (pkts, r, ev) = read_all(&mut d);
             assert_eq!((r, pkts.len()), (Ok(()), 126), "declared {declared}");
             assert!(ev.is_empty(), "declared {declared}: {ev:?}");
@@ -1231,7 +1243,7 @@ fn a_declared_frame_count_may_count_the_info_frame() {
 
 #[test]
 fn any_other_declared_frame_count_is_an_error_or_clamped() {
-    for declared in [125u32, 128, 1000] {
+    for declared in [125u32, 128, 400] {
         let data = with_tag(declared, 576, 1000);
         let mut d = open(data.clone(), &strict());
         let (pkts, r, _) = read_all(&mut d);
@@ -1291,11 +1303,12 @@ fn a_consistent_tag_and_an_untagged_stream_report_no_conflict() {
 fn a_constant_bitrate_count_that_includes_the_info_frame_is_normalised_at_open() {
     // The audio of the fixture is 126 frames. An Info header declaring 127 counts its own
     // frame: the bytes of the audio say so (constant bitrate arithmetic), so the track holds
-    // 126 frames and the stream must end exactly there.
-    let mut d = open(with_tag(127, 576, 1000), &strict());
+    // 126 frames and the stream must end exactly there. (Only without a trusted LAME tag: LAME
+    // never counts the Info frame.)
+    let mut d = open(with_untrusted_tag(127), &strict());
     let t = d.tracks()[0].clone();
     assert_eq!(t.frames, Some(126 * 1152));
-    assert_eq!(t.gapless, GaplessKind::FromMetadata);
+    assert_eq!(t.gapless, GaplessKind::Unknown);
     let (pkts, r, ev) = read_all(&mut d);
     assert_eq!((r, pkts.len(), ev.len()), (Ok(()), 126, 0));
     // The plain count is left alone.
@@ -1321,5 +1334,214 @@ fn a_zero_or_missing_frame_count_means_no_declared_length() {
         assert_eq!(d.tracks()[0].frames, None);
         let (pkts, r, ev) = read_all(&mut d);
         assert_eq!((r, pkts.len(), ev.len()), (Ok(()), 126, 0));
+    }
+}
+
+#[test]
+fn a_frame_count_the_audio_cannot_hold_is_invalid_or_dropped() {
+    // The fixture holds 126 frames in 48 384 bytes; at the smallest legal frame of the stream
+    // (32 kbit/s at 48 kHz: 96 bytes) the audio holds at most 505. A larger count is a damaged
+    // header, never a size that may hit the frame limit: Strict mode refuses to open, Resilient
+    // mode drops the count (no length, no gapless numbers) and reports one GaplessConflict.
+    for declared in [0xFFFF_FFFFu32, 60_000_000, 1_000_000, 506] {
+        let data = with_tag(declared, 576, 1000);
+        match open_mpa(Box::new(VecSource::new(data.clone())), &strict()) {
+            Err(Error::Invalid { what, .. }) => {
+                assert_eq!(what, "mpeg frame count", "declared {declared}")
+            }
+            Err(e) => panic!("declared {declared}: {e:?}"),
+            Ok(d) => panic!(
+                "declared {declared}: opened with {:?}",
+                d.tracks()[0].frames
+            ),
+        }
+        let mut d = open(data, &resilient());
+        let t = d.tracks()[0].clone();
+        assert_eq!(t.frames, None, "declared {declared}");
+        assert_eq!(t.gapless, GaplessKind::Unknown, "declared {declared}");
+        let (pkts, r, ev) = read_all(&mut d);
+        assert_eq!((r, pkts.len()), (Ok(()), 126), "declared {declared}");
+        assert_eq!(
+            ev,
+            vec![Event::GaplessConflict {
+                what: "mpeg frame count exceeds the audio size"
+            }],
+            "declared {declared}"
+        );
+    }
+    // The bound itself is still a count (checked at the end of the stream as before).
+    let mut d = open(with_tag(505, 576, 1000), &resilient());
+    assert_eq!(d.tracks()[0].frames, Some(505 * 1152));
+    let (_, r, ev) = read_all(&mut d);
+    assert_eq!(r, Ok(()));
+    assert!(
+        matches!(
+            ev[..],
+            [Event::Clamped {
+                declared: 505,
+                actual: 126,
+                ..
+            }]
+        ),
+        "{ev:?}"
+    );
+}
+
+/// [`with_tag`] with the LAME tag checksum broken, so that the tag is not trusted.
+fn with_untrusted_tag(frames: u32) -> Vec<u8> {
+    let mut data = with_tag(frames, 576, 1000);
+    let o = data.windows(4).position(|w| w == b"Info").unwrap() + 120;
+    data[o + 34] ^= 0xFF;
+    data
+}
+
+#[test]
+fn a_trusted_lame_tag_makes_the_frame_count_exact() {
+    // LAME and FFmpeg count the audio frames without the Info frame. With a CRC-valid LAME tag
+    // the count is exact: a CBR file cut by exactly one frame (125 of 126 frames left) is not
+    // taken for a writer that counted the Info frame.
+    let mut cut = with_tag(126, 576, 1000);
+    let last = cut.len() - 384;
+    assert_eq!(&cut[last..last + 2], &[0xFF, 0xFB]);
+    cut.truncate(last);
+    let mut d = open(cut.clone(), &strict());
+    assert_eq!(d.tracks()[0].frames, Some(126 * 1152));
+    let (pkts, r, _) = read_all(&mut d);
+    assert_eq!(pkts.len(), 125);
+    assert_eq!(invalid(&r).0, "mpeg frame count");
+    let mut d = open(cut, &resilient());
+    let (pkts, r, ev) = read_all(&mut d);
+    assert_eq!((r, pkts.len()), (Ok(()), 125));
+    assert_eq!(
+        ev,
+        vec![Event::Clamped {
+            what: "mpeg frame count",
+            declared: 126,
+            actual: 125
+        }]
+    );
+    // A trusted tag that counts one frame too many is the same contradiction.
+    let mut d = open(with_tag(127, 576, 1000), &strict());
+    let (pkts, r, _) = read_all(&mut d);
+    assert_eq!(pkts.len(), 126);
+    assert_eq!(invalid(&r).0, "mpeg frame count");
+    // Without a trusted tag a count of one more is still read as including the Info frame.
+    let mut d = open(with_untrusted_tag(127), &strict());
+    assert_eq!(d.tracks()[0].frames, Some(126 * 1152));
+    let (pkts, r, ev) = read_all(&mut d);
+    assert_eq!((r, pkts.len(), ev.len()), (Ok(()), 126, 0));
+}
+
+// ---------------------------------------------------------------- tags between frames
+
+/// A Layer III fixture of the decoder crate (no ID3v2 tag, no Xing/Info frame).
+fn plain_l3() -> Vec<u8> {
+    let path = format!(
+        "{}/../vynamp-decode-mp3/tests/fixtures/l3-cbr128-44k-joint.mp3",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    std::fs::read(&path).unwrap_or_else(|e| panic!("{path}: {e}"))
+}
+
+/// An ID3v2.4 tag whose body holds look-alike frame headers.
+fn mid_id3v2(body: usize) -> Vec<u8> {
+    let mut t = b"ID3\x04\x00\x00".to_vec();
+    t.extend((0..4).rev().map(|i| ((body >> (7 * i)) & 0x7F) as u8));
+    t.extend((0..body).map(|i| if i % 50 == 0 { 0xFF } else { 0xFB }));
+    t
+}
+
+/// An APEv2 tag with a header: header, one item, footer.
+fn mid_apev2() -> Vec<u8> {
+    let item = b"\x05\x00\x00\x00\x00\x00\x00\x00Title\x00\xFF\xFB\x90\x64\x00";
+    let size = (item.len() + 32) as u32;
+    let block = |header: bool| {
+        let mut b = b"APETAGEX".to_vec();
+        b.extend(2000u32.to_le_bytes());
+        b.extend(size.to_le_bytes());
+        b.extend(1u32.to_le_bytes());
+        let flags = (1u32 << 31) | if header { 1 << 29 } else { 0 };
+        b.extend(flags.to_le_bytes());
+        b.extend([0; 8]);
+        b
+    };
+    let mut t = block(true);
+    t.extend_from_slice(item);
+    t.extend(block(false));
+    t
+}
+
+fn mid_id3v1() -> Vec<u8> {
+    let mut t = b"TAG".to_vec();
+    t.resize(128, 0xFF);
+    t
+}
+
+#[test]
+fn tags_between_two_concatenated_streams_are_skipped_without_loss() {
+    let a = plain_l3();
+    let n = clean(&a).len();
+    for (name, tag) in [
+        ("id3v2", mid_id3v2(300)),
+        ("id3v2 tiny", mid_id3v2(0)),
+        ("apev2", mid_apev2()),
+        ("id3v1", mid_id3v1()),
+        ("id3v1 + id3v2", [mid_id3v1(), mid_id3v2(40)].concat()),
+    ] {
+        let data = [a.clone(), tag, a.clone()].concat();
+        for opts in [strict(), resilient()] {
+            let mut d = open(data.clone(), &opts);
+            let (pkts, r, ev) = read_all(&mut d);
+            assert_eq!(r, Ok(()), "{name} {:?}", opts.mode);
+            assert!(ev.is_empty(), "{name} {:?}: {ev:?}", opts.mode);
+            assert_eq!(pkts.len(), 2 * n, "{name} {:?}", opts.mode);
+            assert!(
+                pkts.iter()
+                    .enumerate()
+                    .all(|(i, p)| p.pts == i as u64 * 1152 && !p.data.is_empty()),
+                "{name} {:?}: timeline",
+                opts.mode
+            );
+            // Seeking counts across the tag the same way.
+            let t = (n as u64 + 3) * 1152;
+            let to = d.seek(0, t).unwrap();
+            let mut p = Packet::default();
+            assert!(d.next_packet(&mut p).unwrap());
+            assert_eq!(p.pts, to.frame, "{name}");
+            let want = pkts.iter().find(|q| q.pts == to.frame).unwrap();
+            assert_eq!(p.data, want.data, "{name}");
+        }
+    }
+}
+
+#[test]
+fn a_second_file_with_an_id3v2_tag_and_an_info_frame_continues_the_timeline() {
+    // Two FFmpeg files back to back: the second starts with an ID3v2 tag and an Info frame.
+    // Neither is audio: the timeline goes on without a gap, lost frames or silence. The first
+    // file's Info header declares 126 frames, so the 252 found are reported at the end.
+    let a = fixture("cbr128-48k-stereo.mp3");
+    let data = [a.clone(), a].concat();
+    for opts in [strict(), resilient()] {
+        let mut d = open(data.clone(), &opts);
+        let (pkts, r, ev) = read_all(&mut d);
+        assert_eq!(pkts.len(), 252, "{:?}", opts.mode);
+        assert!(
+            pkts.iter()
+                .enumerate()
+                .all(|(i, p)| p.pts == i as u64 * 1152 && !p.data.is_empty())
+        );
+        if opts.mode == Mode::Strict {
+            assert_eq!(invalid(&r).0, "mpeg frame count");
+        } else {
+            assert_eq!(r, Ok(()));
+            assert_eq!(
+                ev,
+                vec![Event::Clamped {
+                    what: "mpeg frame count",
+                    declared: 126,
+                    actual: 252
+                }]
+            );
+        }
     }
 }

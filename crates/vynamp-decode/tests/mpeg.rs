@@ -160,7 +160,8 @@ fn snr_db(got: &[Vec<f32>], want: &[Vec<f32>]) -> f64 {
 fn the_default_registry_knows_mpeg_audio() {
     let reg = default_registry();
     let mpa = reg.containers().find(|c| c.name == "mpa").expect("mpa");
-    assert!(mpa.extensions.contains(&"mp3"));
+    // `.mpg`/`.mpeg` are MPEG program or system streams (video), not audio elementary streams.
+    assert_eq!(mpa.extensions, &["mp3", "mp2", "mp1", "mpa"]);
     for id in [CodecId::Mp1, CodecId::Mp2, CodecId::Mp3] {
         assert!(reg.codec_for(&id).is_some(), "{id:?}");
     }
@@ -564,54 +565,82 @@ fn the_reader_reports_conflicting_gapless_information() {
     );
 }
 
+/// `data` with the checksum of its LAME tag (after the `tag` header) broken: the tag is then
+/// not trusted, as for a writer that is not LAME.
+fn untrusted(mut data: Vec<u8>, tag: &[u8; 4]) -> Vec<u8> {
+    let o = data.windows(4).position(|w| w == tag).unwrap() + 120;
+    data[o + 34] ^= 0xFF;
+    data
+}
+
 #[test]
 fn an_info_header_that_counts_its_own_frame_still_gives_the_exact_length() {
-    // The file has 14 audio frames; the tag says 15, counting the Info frame. The output must
-    // still be the 14400 frames that were encoded, and Strict mode must reach the end cleanly.
+    // The file has 14 audio frames. A writer that counts the Info frame says 15; it is not
+    // LAME, so its LAME tag (here: one with a broken checksum) is not trusted, and the size of
+    // the audio shows that 15 includes the Info frame. Strict mode must reach the end cleanly.
     let (_, plain) = decode(&gapless("g-cbr128-48k-stereo.mp3"));
-    for declared in [14, 15] {
-        for mode in [Mode::Strict, Mode::Resilient] {
-            let mut r = reader_of(with_info(declared, None), mode);
-            assert_eq!(r.track().frames, Some(14 * 1152), "declared {declared}");
-            assert_eq!(r.track().gapless, GaplessKind::FromMetadata);
-            assert_eq!(r.frames(), Some(14400), "declared {declared}");
-            let (planes, res) = drain(&mut r);
-            assert_eq!(res, Ok(()), "declared {declared} {mode:?}");
-            assert!(planes == plain, "declared {declared} {mode:?}");
-            assert!(r.take_events().is_empty(), "declared {declared} {mode:?}");
-        }
+    for mode in [Mode::Strict, Mode::Resilient] {
+        let mut r = reader_of(with_info(14, None), mode);
+        assert_eq!(r.track().frames, Some(14 * 1152));
+        assert_eq!(r.track().gapless, GaplessKind::FromMetadata);
+        assert_eq!(r.frames(), Some(14400));
+        let (planes, res) = drain(&mut r);
+        assert_eq!(res, Ok(()), "{mode:?}");
+        assert!(planes == plain, "{mode:?}");
+        assert!(r.take_events().is_empty(), "{mode:?}");
+
+        let mut r = reader_of(untrusted(with_info(15, None), b"Info"), mode);
+        assert_eq!(r.track().frames, Some(14 * 1152), "{mode:?}");
+        assert_eq!(r.track().gapless, GaplessKind::Unknown);
+        let (planes, res) = drain(&mut r);
+        assert_eq!(res, Ok(()), "{mode:?}");
+        assert_eq!(planes[0].len(), 14 * 1152 - 529, "{mode:?}");
+        assert!(r.take_events().is_empty(), "{mode:?}");
     }
+    // A trusted LAME tag makes the count exact: 15 is a contradiction.
+    let (_, res) = drain(&mut reader_of(with_info(15, None), Mode::Strict));
+    assert!(
+        res.is_err(),
+        "strict accepted a trusted count of delivered + 1"
+    );
 }
 
 #[test]
 fn a_vbr_count_that_includes_the_info_frame_is_tolerated_without_an_event() {
-    // A variable bitrate file cannot be checked against the size of its audio, so a count that
-    // includes the Info frame (delivered + 1) is taken as it is: the demuxer accepts the end of
-    // the stream one frame short, in Strict mode too. Any other count is an error.
+    // A variable bitrate file cannot be checked against the size of its audio, so without a
+    // trusted LAME tag a count that includes the Info frame (delivered + 1) is taken as it is:
+    // the demuxer accepts the end of the stream one frame short, in Strict mode too. With a
+    // trusted tag (LAME never counts the Info frame) and for any other count it is an error.
     let name = "g-vbr2-48k-stereo.mp3";
-    let (plain_reader, plain) = decode(&gapless(name));
+    let (plain_reader, _) = decode(&gapless(name));
     let delivered = plain_reader.track().frames.unwrap() / 1152;
     for mode in [Mode::Strict, Mode::Resilient] {
-        let data = with_tag_of(name, b"Xing", delivered as u32 + 1, None);
+        let data = untrusted(
+            with_tag_of(name, b"Xing", delivered as u32 + 1, None),
+            b"Xing",
+        );
         let mut r = reader_of(data, mode);
         assert_eq!(r.track().frames, Some((delivered + 1) * 1152), "{mode:?}");
-        let (planes, res) = drain(&mut r);
+        assert_eq!(r.track().gapless, GaplessKind::Unknown);
+        let (_, res) = drain(&mut r);
         assert_eq!(res, Ok(()), "{mode:?}");
         assert!(r.take_events().is_empty(), "{mode:?}");
-        // The declared total is one frame longer than the audio, so the trailing padding that
-        // the LAME tag asks to trim lies beyond the data and stays: the output is the plain one
-        // plus that padding (the cost of tolerating the count; no way to tell the cases apart).
-        let padding = plain_reader.track().padding as usize;
-        assert!(padding > 0);
-        assert_eq!(planes[0].len(), plain[0].len() + padding, "{mode:?}");
-        assert!(planes[0][..plain[0].len()] == plain[0][..], "{mode:?}");
         // Two frames too many is a contradiction, not a tolerated off-by-one.
-        let data = with_tag_of(name, b"Xing", delivered as u32 + 2, None);
+        let data = untrusted(
+            with_tag_of(name, b"Xing", delivered as u32 + 2, None),
+            b"Xing",
+        );
         let (_, res) = drain(&mut reader_of(data, mode));
         if mode == Mode::Strict {
             assert!(res.is_err(), "strict accepted delivered + 2");
         }
     }
+    let data = with_tag_of(name, b"Xing", delivered as u32 + 1, None);
+    let (_, res) = drain(&mut reader_of(data, Mode::Strict));
+    assert!(
+        res.is_err(),
+        "strict accepted a trusted count of delivered + 1"
+    );
 }
 
 #[test]

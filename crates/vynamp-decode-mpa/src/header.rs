@@ -204,4 +204,24 @@ impl FrameHeader {
     pub fn min_frame_len(&self) -> usize {
         4 + if self.crc { 2 } else { 0 } + self.side_info_len().max(4)
     }
+
+    /// Length of the shortest frame a stream of this version, layer and sample rate can have:
+    /// the lowest bitrate (index 1) without padding.
+    pub(crate) fn smallest_frame_len(&self) -> usize {
+        let row = match (self.version, self.layer) {
+            (MpegVersion::V1, 1) => 0,
+            (MpegVersion::V1, 2) => 1,
+            (MpegVersion::V1, _) => 2,
+            (_, 1) => 3,
+            _ => 4,
+        };
+        let coefficient: u32 = match (self.layer, self.version) {
+            (1, _) => 48,
+            (3, MpegVersion::V2 | MpegVersion::V25) => 72,
+            _ => 144,
+        };
+        let slot = self.slot_size();
+        let body = (coefficient * BITRATES[row][0] * 1000 / self.sample_rate) as usize;
+        body / slot * slot
+    }
 }

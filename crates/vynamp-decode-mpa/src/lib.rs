@@ -16,15 +16,22 @@
 //! the audio (some encoders count the header frame), is `Invalid { what: "mpeg frame count" }`,
 //! also when more frames are found than declared); in `Mode::Resilient` the lost span becomes
 //! silence packets (empty `data`, at most eight per gap) and one `Event::CorruptFrame`.
+//! A Strict error ends the stream as delivered: to continue, the caller seeks (and resets the
+//! decoder, whose synthesis history has advanced over the frames before the error).
+//!
+//! ID3v2, ID3v1 and APEv2 (with header) tags between frames, as in concatenated files, are
+//! skipped in both modes together with a Xing/Info/VBRI frame right after them: they are not
+//! audio, so they cost no lost frames, no silence and no jump of the timeline.
 //!
 //! `seek` is exact and returns a start before the target. For Layer III the start is computed:
 //! the `main_data_begin` of the goal frame and of the two frames before it (the overlap of the
 //! inverse MDCT and the filterbank history of the goal's first granule) say how many bytes of
 //! earlier main data they need; the start is the earliest frame whose successors' main data
 //! covers all three (at most 32 frames back), so that the output from the goal on is identical
-//! to a decode from the start of the stream. For Layers I and II it is one frame earlier (the
-//! synthesis filterbank needs a frame to warm up). `SeekTo::preroll` is the number of samples to
-//! discard after decoding from there.
+//! to a decode from the start of the stream. For Layers I and II the start covers the history of
+//! the synthesis filterbank (a slot of 32 samples depends on the 15 before it): two frames
+//! earlier for Layer I (12 slots per frame), one for Layer II (36). `SeekTo::preroll` is the
+//! number of samples to discard after decoding from there.
 #![warn(missing_docs)]
 
 mod demux;
@@ -63,7 +70,7 @@ pub fn probe_mpa(header: &[u8]) -> u8 {
         while h.frame_len != 0 {
             pos += h.frame_len;
             let Some(b) = header.get(pos..pos + 4) else {
-                room = header.len() >= pos + 4;
+                // The probe ends inside the successor's header: no room to tell.
                 break;
             };
             match parse_header([b[0], b[1], b[2], b[3]]) {

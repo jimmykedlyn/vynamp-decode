@@ -131,12 +131,38 @@ fn the_corpus_covers_every_layer_two_table_and_the_layer_three_modes() {
     assert!(rows.iter().any(|r| r.layer == 3 && r.rate == 8000));
 }
 
+/// The manifest lists exactly 12 Layer II and 21 Layer III encodes, and the directory holds
+/// nothing but `MANIFEST.txt`, `.gitattributes`, those files and the references they name
+/// (no orphans).
+fn assert_corpus_is_exactly_the_manifest(rows: &[Row]) {
+    let count = |layer| rows.iter().filter(|r| r.layer == layer).count();
+    assert_eq!((count(2), count(3), rows.len()), (12, 21, 33));
+    let mut listed: Vec<&str> = rows
+        .iter()
+        .flat_map(|r| [r.file.as_str(), r.reference.as_str()])
+        .chain(["MANIFEST.txt", ".gitattributes"])
+        .collect();
+    listed.sort_unstable();
+    let before = listed.len();
+    listed.dedup();
+    assert_eq!(listed.len(), before, "a file is listed twice");
+    let mut present: Vec<String> = std::fs::read_dir(dir())
+        .expect("corpus directory")
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect();
+    present.sort_unstable();
+    assert_eq!(
+        present, listed,
+        "the corpus directory and MANIFEST.txt disagree"
+    );
+}
+
 #[test]
 fn every_fixture_matches_its_checksum_and_the_reference_within_the_iso_criterion() {
     let rms_limit = 2f64.powi(-15) / 12f64.sqrt();
     let max_limit = 2f64.powi(-14);
     let rows = manifest();
-    assert!(rows.len() >= 30, "{} fixtures", rows.len());
+    assert_corpus_is_exactly_the_manifest(&rows);
     for row in &rows {
         let path = dir().join(&row.file);
         let data = std::fs::read(&path).unwrap_or_else(|e| panic!("{path:?}: {e}"));

@@ -399,3 +399,48 @@ fn garbage_never_panics() {
         }
     }
 }
+
+/// Demuxes and decodes a whole stream, one vector per channel.
+fn demux_decode(data: Vec<u8>) -> Vec<Vec<f32>> {
+    use vynamp_decode_core::{Demuxer, VecSource};
+    let o = opts(Mode::Strict);
+    let mut demux = vynamp_decode_mpa::open_mpa(Box::new(VecSource::new(data)), &o).unwrap();
+    let t = demux.tracks()[0].clone();
+    let mut d = MpegDecoder::new(&t, &o).unwrap();
+    let mut planes = vec![Vec::new(); usize::from(t.channels)];
+    let (mut p, mut out) = (Packet::default(), AudioBuffer::new());
+    while demux.next_packet(&mut p).unwrap() {
+        d.decode(&p, &mut out).unwrap();
+        for (c, v) in planes.iter_mut().enumerate() {
+            v.extend_from_slice(out.plane_f32(c).unwrap());
+        }
+    }
+    planes
+}
+
+#[test]
+fn free_format_takes_its_bitrate_from_the_frame_length() {
+    // The demuxer crate's FFmpeg `mp2` encode at 128 kbit/s, 44.1 kHz stereo (64 kbit/s per
+    // channel: table A, 27 subbands). Setting every bitrate index to 0 makes it a valid
+    // free-format stream with the same frames (417 bytes plus the padding slot), whose
+    // decode must be the constant bitrate one: the table comes from the frame length.
+    let path = format!(
+        "{}/../vynamp-decode-mpa/tests/fixtures/mp2-128k-44k-stereo.mp2",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let cbr = std::fs::read(&path).unwrap();
+    let mut free = cbr.clone();
+    let mut frames = 0;
+    for (offset, frame) in split_frames(&cbr) {
+        assert_eq!(frame[2] >> 4, 8, "128 kbit/s");
+        free[offset as usize + 2] &= 0x0F;
+        frames += 1;
+    }
+    let want = demux_decode(cbr);
+    let got = demux_decode(free);
+    assert_eq!(got[0].len(), frames * 1152);
+    assert!(
+        got == want,
+        "the free-format decode differs from the CBR decode"
+    );
+}

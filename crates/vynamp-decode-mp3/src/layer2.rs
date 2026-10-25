@@ -76,17 +76,28 @@ const MPEG1_LOW: [Group; 2] = [g(44, 4, 2), g(44, 3, 10)];
 /// The MPEG-2 (LSF) table of 30 subbands.
 const LSF: [Group; 3] = [g(60, 4, 4), g(44, 3, 7), g(44, 2, 19)];
 
-/// The allocation groups and the number of coded subbands (`sblimit`) for `header`.
+/// The allocation groups and the number of coded subbands (`sblimit`) for `header` and a frame
+/// of `frame_len` bytes.
 ///
-/// MPEG-1 by bitrate per channel (free format counts as 192 kbit/s) and sample rate:
+/// MPEG-1 by bitrate per channel and sample rate (free format: the bitrate the frame length
+/// stands for, `(frame_len - padding) * sample rate / 144000` kbit/s, rounded):
 /// below 56 kbit/s the low rate tables (12 subbands at 32 kHz, 8 otherwise); from 96 kbit/s
 /// 30 subbands except at 48 kHz; otherwise 27.
-fn select(header: &FrameHeader) -> (&'static [Group], usize) {
+fn select(header: &FrameHeader, frame_len: usize) -> (&'static [Group], usize) {
     if header.version != MpegVersion::V1 {
         return (&LSF, 30);
     }
     let kbps = match header.bitrate_kbps {
-        0 => 192,
+        0 => {
+            let body = frame_len.saturating_sub(usize::from(header.padding)) as u64;
+            let total = (body * u64::from(header.sample_rate) + 72_000) / 144_000;
+            let total = u32::try_from(total).unwrap_or(u32::MAX);
+            if header.channel_mode == ChannelMode::Mono {
+                total
+            } else {
+                total / 2
+            }
+        }
         k if header.channel_mode == ChannelMode::Mono => k,
         k => k / 2,
     };
@@ -153,7 +164,7 @@ pub(crate) fn decode_frame(
     pcm: &mut [[f32; MAX_SAMPLES]; 2],
 ) -> Result<()> {
     let nch = usize::from(header.channels());
-    let (groups, sblimit) = select(header);
+    let (groups, sblimit) = select(header, data.len());
     let bound = if header.channel_mode == ChannelMode::JointStereo {
         (4 + 4 * usize::from(header.mode_ext)).min(sblimit)
     } else {
@@ -592,13 +603,25 @@ mod tests {
     }
 
     #[test]
+    fn free_format_selects_the_table_of_the_bitrate_its_length_stands_for() {
+        // 44.1 kHz stereo, bitrate index 0. 417 bytes (418 padded) are 128 kbit/s: table A.
+        let h = parse_header([0xFF, 0xFD, 0x00, 0x04]).unwrap();
+        let hp = parse_header([0xFF, 0xFD, 0x02, 0x04]).unwrap();
+        assert_eq!(select(&h, 417).1, 27);
+        assert_eq!(select(&hp, 418).1, 27);
+        // 1254 bytes are 384 kbit/s: table B; 208 bytes are 64 kbit/s: table C.
+        assert_eq!(select(&h, 1254).1, 30);
+        assert_eq!(select(&h, 208).1, 8);
+    }
+
+    #[test]
     fn allocation_tables_have_the_standard_sizes() {
         // Header: MPEG-1 Layer II, no CRC; bitrate index, sample rate index, channel mode.
         // Bitrate indices: 1:32 2:48 3:56 4:64 5:80 6:96 7:112 8:128 9:160 10:192 11:224 12:256
         // 13:320 14:384. Sample rates: 0:44.1k 1:48k 2:32k.
         let bits = |hdr: [u8; 4]| {
             let h = parse_header(hdr).unwrap();
-            let (groups, sblimit) = select(&h);
+            let (groups, sblimit) = select(&h, h.frame_len);
             let mut left = sblimit;
             let mut total = 0;
             for g in groups {

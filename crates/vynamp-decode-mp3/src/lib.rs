@@ -29,6 +29,13 @@
 //! Resilient gap marker) decodes to silence of `Packet::frames` frames. A Layer I/II
 //! decoder's output lags its encoder's input by 481 samples (the filterbank delay); the
 //! `Track::delay` is set by the demuxer.
+//!
+//! **A Strict error is terminal.** When `decode` returns an error in `Mode::Strict`, the
+//! synthesis filterbank history (and, for Layer III, the IMDCT overlap and the bit reservoir)
+//! may already have advanced over part of the damaged frame. Feeding the next packet after it
+//! would give output that matches no decode of the stream: the caller must seek (which resets
+//! the decoder) or call [`Decoder::reset`] before continuing. `Mode::Resilient` performs that
+//! reset itself.
 #![warn(missing_docs)]
 
 mod layer1;

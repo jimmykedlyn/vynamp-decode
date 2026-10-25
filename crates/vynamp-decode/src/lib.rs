@@ -45,7 +45,7 @@ pub static FLAC: ContainerDescriptor = ContainerDescriptor {
 #[cfg(feature = "mpa")]
 pub static MPA: ContainerDescriptor = ContainerDescriptor {
     name: "mpa",
-    extensions: &["mp3", "mp2", "mp1", "mpa", "mpg", "mpeg"],
+    extensions: &["mp3", "mp2", "mp1", "mpa"],
     probe: vynamp_decode_mpa::probe_mpa,
     verification: Verification::Oracle,
     open: |src, opts| Ok(Box::new(vynamp_decode_mpa::open_mpa(src, opts)?)),

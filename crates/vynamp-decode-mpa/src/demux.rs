@@ -13,7 +13,8 @@
 //! them once). The frame count of a Xing/Info/VBRI header is checked when the stream ends: it
 //! must be the number of frames found (a count that includes the header frame is recognised at
 //! open by the size of the audio when an Info header allows constant bitrate arithmetic, and
-//! otherwise tolerated as one more than the frames found); any other count is `Invalid { what:
+//! otherwise tolerated as one more than the frames found, unless a CRC-valid LAME tag makes the
+//! count exact); any other count is `Invalid { what:
 //! "mpeg frame count" }` in Strict mode and `Event::Clamped` in Resilient mode, also when the
 //! stream holds more frames than declared (the header is inconsistent, and a reader that trusts
 //! it would cut audio). A count of 0 is treated as absent. A frame whose successor is not a
@@ -22,6 +23,9 @@
 //! the next confirmed frame, reports the lost span as one `Event::CorruptFrame` (the number of lost
 //! frames estimated from the span and the last frame length), delivers at most eight frames
 //! of silence for it (packets with empty `data`) and moves the timeline over the rest.
+//!
+//! Tags between frames (concatenated files) are skipped, with a header frame right after
+//! them, without loss.
 //!
 //! Seeking is exact. The index of a frame is only known by counting from a known point, so
 //! `seek` counts frames from the nearest checkpoint (recorded while reading) and records
@@ -51,8 +55,12 @@ const MAX_SYNC_SCAN: u64 = 1 << 20;
 /// Layer III seeks look back at most this many frames for the main data of the bit reservoir
 /// (`main_data_begin` reaches back at most 511 bytes), for the goal and the two frames before it.
 const MAX_PREROLL_LAYER3: u64 = 32;
-/// Layers I and II have no reservoir; one frame warms the synthesis filterbank up.
-const PREROLL_OTHER: u64 = 1;
+/// Layers I and II have no reservoir, but the synthesis of a slot of 32 samples depends on the
+/// 15 slots before it. A Layer I frame holds 12 slots, so two frames warm the filterbank up for
+/// any sample of the goal frame; a Layer II frame holds 36, so one is enough.
+const PREROLL_LAYER1: u64 = 2;
+/// See [`PREROLL_LAYER1`].
+const PREROLL_LAYER2: u64 = 1;
 /// One seek checkpoint is recorded per this many frames.
 const ANCHOR_STEP: u64 = 64;
 /// Checkpoints kept at most.
@@ -375,6 +383,62 @@ impl MpaDemuxer {
         Ok(self.scan(from, u64::MAX, reference)?.map(|(at, _)| at))
     }
 
+    /// Length of a tag that starts at `pos`: an ID3v2 tag, an ID3v1 tag (`TAG`, 128 bytes) or
+    /// an APEv2 tag with a header. Concatenated files carry them between frames.
+    fn tag_len(&mut self, pos: u64) -> Result<Option<u64>> {
+        let w = self.window(pos, 32)?;
+        if w.len() >= 10
+            && &w[..3] == b"ID3"
+            && w[3] != 0xFF
+            && w[4] != 0xFF
+            && w[6..10].iter().all(|&b| b < 0x80)
+        {
+            let size = w[6..10].iter().fold(0u64, |a, &b| a << 7 | u64::from(b));
+            let footer = if w[5] & 0x10 != 0 { 10 } else { 0 };
+            return Ok(Some(10 + size + footer));
+        }
+        if w.len() >= 32 && &w[..8] == b"APETAGEX" {
+            let le = |at: usize| u32::from_le_bytes([w[at], w[at + 1], w[at + 2], w[at + 3]]);
+            // Only a header (flag bit 29) says where the tag ends: header plus `size`.
+            if le(20) & (1 << 29) != 0 {
+                return Ok(Some(32 + u64::from(le(12))));
+            }
+            return Ok(None);
+        }
+        if w.len() >= 3 && &w[..3] == b"TAG" && self.window(pos, 128)?.len() == 128 {
+            return Ok(Some(128));
+        }
+        Ok(None)
+    }
+
+    /// Skips the tags (see [`Self::tag_len`]) that start at `pos`, and a Xing/Info/VBRI header
+    /// frame right after them (the start of a concatenated file). Returns where the stream goes
+    /// on, if at least one tag was skipped and a frame of the stream, or the end of the data,
+    /// follows.
+    fn skip_tags(&mut self, pos: u64) -> Result<Option<u64>> {
+        let mut at = pos;
+        while let Some(len) = self.tag_len(at)? {
+            at = at.saturating_add(len);
+        }
+        if at == pos {
+            return Ok(None);
+        }
+        if self.window(at, 4)?.is_empty() {
+            return Ok(Some(at));
+        }
+        let Some((_, len)) = self.frame_at(at)? else {
+            return Ok(None);
+        };
+        let frame = self.window(at, len)?;
+        if frame.len() == len && parse_vbr(frame).is_some() {
+            at += len as u64;
+            if self.window(at, 4)?.len() == 4 && self.frame_at(at)?.is_none() {
+                return Ok(None);
+            }
+        }
+        Ok(Some(at))
+    }
+
     /// Number of frames a span of `bytes` stands for, at least one.
     fn lost_frames(&self, bytes: u64) -> u64 {
         let len = self.last_len.max(1) as u64;
@@ -461,7 +525,12 @@ impl MpaDemuxer {
                 self.anchor(idx, pos, len);
                 continue;
             }
-            // No frame here: the end of the audio, or lost sync.
+            // No frame here: a tag between concatenated files, the end of the audio, or lost
+            // sync.
+            if let Some(q) = self.skip_tags(pos)? {
+                pos = q;
+                continue;
+            }
             let rest = self.window(pos, 4)?.len();
             if rest == 0 {
                 return Ok(Walk::End { pos, total: idx });
@@ -569,6 +638,9 @@ impl MpaDemuxer {
             && Self::consistent(&self.ref_h, &n)
             && (n.bitrate_kbps == 0) == self.free_base.is_some()
         {
+            return Ok(None);
+        }
+        if self.skip_tags(next)?.is_some() {
             return Ok(None);
         }
         let Some(q) = self.resync(pos + 1)? else {
@@ -701,20 +773,27 @@ impl MpaDemuxer {
 /// up to 529 samples (the tail was never encoded; FFmpeg trims the same way). A tag whose delay
 /// and padding do not fit the frame count is ignored and reported as `Event::GaplessConflict`.
 ///
-/// The frame count is the number of audio frames, the header frame excluded (LAME and FFmpeg).
-/// A CBR file truncated by exactly one frame matches the declared-1 reading and is normalised
-/// silently.
-/// A count of 0 is treated as absent (`frames` is `None`). A count that includes the header
-/// frame is recognised when the Info header of a constant bitrate stream agrees with the size
-/// of the audio; then `frames` is one frame less than declared. Without that check the count
-/// is taken as it is, and the end of the stream may exceed it by one frame.
+/// The frame count is the number of audio frames, the header frame excluded (LAME and FFmpeg
+/// write it so). With a CRC-valid LAME tag it is exact: a file that ends one frame early or
+/// late is an error in Strict mode and `Clamped` in Resilient mode. Without one, a count that
+/// includes the header frame is recognised when the Info header of a constant bitrate stream
+/// agrees with the size of the audio (then `frames` is one frame less than declared), and
+/// otherwise the end of the stream may fall one frame short of the count. A count of 0 is
+/// treated as absent (`frames` is `None`). A count larger than the audio can hold at the
+/// shortest frame of the stream (`(audio bytes) / (shortest frame) + 1`, when the size of the
+/// audio is known) is a damaged header: `Invalid { what: "mpeg frame count" }` in Strict mode;
+/// Resilient mode drops it (`frames` is `None`, gapless `Unknown`) and reports
+/// `Event::GaplessConflict { what: "mpeg frame count exceeds the audio size" }` (the count is
+/// the gapless length and conflicts with the file size; `Clamped` would need a value to use
+/// instead, and there is none). Only a plausible count can raise `Limit(Frames)`.
 ///
 /// Without a LAME tag a Layer III track has `delay = 529` and `gapless = Unknown`; Layer I and
 /// II tracks have `delay = 481` (the synthesis filterbank delay; these layers carry no encoder
 /// delay metadata), `padding = 0` and `Unknown`.
 ///
 /// # Errors
-/// `Invalid { what: "mpeg sync" }` if no frame is found, limit errors, source errors.
+/// `Invalid { what: "mpeg sync" }` if no frame is found, `Invalid { what: "mpeg frame count" }`
+/// (Strict) for an impossible frame count, limit errors, source errors.
 pub fn open_mpa(mut src: Box<dyn Source>, opts: &Options) -> Result<MpaDemuxer> {
     opts.cancel.check()?;
     if let Some(len) = src.len() {
@@ -795,12 +874,42 @@ pub fn open_mpa(mut src: Box<dyn Source>, opts: &Options) -> Result<MpaDemuxer> 
         .filter(|&n| n != 0)
         .map(u64::from);
     d.declared = raw;
+    // LAME and FFmpeg count the audio frames without the header frame: with a trusted LAME tag
+    // the count is exact, and a CBR file cut by one frame is not mistaken for a writer that
+    // counted the header frame.
+    let trusted = d
+        .vbr
+        .as_ref()
+        .and_then(|v| v.lame.as_ref())
+        .is_some_and(|l| l.crc_ok);
+    d.declared_exact = trusted && raw.is_some();
     if let Some(raw) = raw
-        && let Some((cbr, n)) = d.detect_cbr(raw)
+        && let Some((cbr, n)) = d.detect_cbr(raw, trusted)
     {
         d.cbr = Some(cbr);
         d.declared = Some(n);
         d.declared_exact = true;
+    }
+    // A count the audio cannot hold even at the stream's shortest frame is a damaged header,
+    // not a size: it must not make the file unopenable through the frame limit.
+    if let Some(n) = d.declared
+        && d.audio_end != u64::MAX
+    {
+        let shortest = d.free_base.unwrap_or_else(|| h.smallest_frame_len()).max(1) as u64;
+        let most = d.audio_end.saturating_sub(d.first_frame) / shortest + 1;
+        if n > most {
+            if d.strict() {
+                return Err(Error::Invalid {
+                    what: "mpeg frame count",
+                    offset: first,
+                });
+            }
+            d.declared = None;
+            d.declared_exact = false;
+            d.event(Event::GaplessConflict {
+                what: "mpeg frame count exceeds the audio size",
+            });
+        }
     }
     let mut frames = None;
     if let Some(n) = d.declared {
@@ -854,10 +963,10 @@ pub fn open_mpa(mut src: Box<dyn Source>, opts: &Options) -> Result<MpaDemuxer> 
 impl MpaDemuxer {
     /// Constant bitrate arithmetic is used only when an Info header (CBR writers' tag) gives a
     /// frame count `declared`, the stream is not free format, and the audio size agrees with
-    /// that count, or with that count less the header frame it may include, at the bitrate of the
-    /// first audio frame to within a few slots. Returns the arithmetic and the number of audio
+    /// that count, or (unless `exact`: a trusted LAME tag) with that count less the header frame it
+    /// may include, at the bitrate of the first audio frame to within a few slots. Returns the arithmetic and the number of audio
     /// frames that agreed.
-    fn detect_cbr(&self, declared: u64) -> Option<(Cbr, u64)> {
+    fn detect_cbr(&self, declared: u64, exact: bool) -> Option<(Cbr, u64)> {
         use crate::vbr::VbrKind;
         let h = self.ref_h;
         let end = self.audio_end;
@@ -877,8 +986,14 @@ impl MpaDemuxer {
         };
         let actual = end.saturating_sub(self.first_frame);
         let slack = 4 * h.slot_size() as u64;
-        [declared, declared - 1]
-            .into_iter()
+        let candidates: &[u64] = if exact {
+            &[declared]
+        } else {
+            &[declared, declared - 1]
+        };
+        candidates
+            .iter()
+            .copied()
             .find(|&n| cbr.estimate(n).abs_diff(actual) <= slack)
             .map(|n| (cbr, n))
     }
@@ -899,6 +1014,12 @@ impl Demuxer for MpaDemuxer {
             return Ok(false);
         }
         let spf = self.spf();
+        if self.frame_at(self.pos)?.is_none()
+            && let Some(q) = self.skip_tags(self.pos)?
+        {
+            // Tags between concatenated files are not audio: no loss, no gap.
+            self.pos = q;
+        }
         let pos = self.pos;
         let rest = self.window(pos, 4)?.len();
         if rest == 0 {
@@ -997,11 +1118,11 @@ impl Demuxer for MpaDemuxer {
         let goal = frame / spf;
         let layer3 = self.ref_h.layer == 3;
         // Layer III: look as far back as the reservoir can reach, then narrow down to what
-        // the goal frame needs. Layers I and II: one frame.
-        let start = goal.saturating_sub(if layer3 {
-            MAX_PREROLL_LAYER3
-        } else {
-            PREROLL_OTHER
+        // the goal frame needs. Layers I and II: the filterbank history (two frames, one).
+        let start = goal.saturating_sub(match self.ref_h.layer {
+            3 => MAX_PREROLL_LAYER3,
+            1 => PREROLL_LAYER1,
+            _ => PREROLL_LAYER2,
         });
         let from = self.cbr_anchor(start)?;
         let mut walked = self.walk(from, start, goal)?;

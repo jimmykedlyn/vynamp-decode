@@ -284,3 +284,65 @@ fn garbage_never_panics() {
         }
     }
 }
+
+/// Decodes every packet `demux` delivers from where it stands, one vector per channel.
+fn decode_rest(demux: &mut vynamp_decode_mpa::MpaDemuxer, d: &mut MpegDecoder) -> Vec<Vec<f32>> {
+    use vynamp_decode_core::Demuxer;
+    let channels = usize::from(demux.tracks()[0].channels);
+    let mut planes = vec![Vec::new(); channels];
+    let (mut p, mut out) = (Packet::default(), AudioBuffer::new());
+    while demux.next_packet(&mut p).unwrap() {
+        d.decode(&p, &mut out).unwrap();
+        for (c, v) in planes.iter_mut().enumerate() {
+            v.extend_from_slice(out.plane_f32(c).unwrap());
+        }
+    }
+    planes
+}
+
+#[test]
+fn layer_one_seeks_give_exactly_the_samples_of_a_full_decode() {
+    // A Layer I frame holds 12 slots of 32 samples; the synthesis of a slot depends on the 15
+    // slots before it, so a seek into the first 96 samples of a frame needs two frames of
+    // preroll. Hand-built random frames make every sample depend on that history.
+    use vynamp_decode_core::{Demuxer, VecSource};
+    for (mode, ext) in [(3u8, 0u8), (0, 0), (1, 2)] {
+        let mut rng = Rng(0x5EED_0001 + u32::from(mode));
+        let data: Vec<u8> = (0..24)
+            .flat_map(|i| random_l1(&mut rng, mode, ext, i % 3 == 0).build())
+            .collect();
+        let o = opts(Mode::Strict);
+        let open = || vynamp_decode_mpa::open_mpa(Box::new(VecSource::new(data.clone())), &o);
+        let mut demux = open().unwrap();
+        let t = demux.tracks()[0].clone();
+        let mut d = MpegDecoder::new(&t, &o).unwrap();
+        let full = decode_rest(&mut demux, &mut d);
+        assert_eq!(full[0].len(), 24 * 384);
+        let mut demux = open().unwrap();
+        let mut targets = Vec::new();
+        for frame in [1u64, 2, 3, 7, 12, 23] {
+            for s in [0u64, 1, 31, 32, 64, 95, 96, 97, 200, 383] {
+                targets.push(frame * 384 + s);
+            }
+        }
+        targets.extend([0, 5, 383]);
+        for target in targets {
+            let to = demux.seek(0, target).unwrap();
+            assert_eq!(to.frame + to.preroll, target);
+            d.reset();
+            let got = decode_rest(&mut demux, &mut d);
+            for (c, (g, f)) in got.iter().zip(&full).enumerate() {
+                let g = &g[to.preroll as usize..];
+                assert_eq!(
+                    g.len(),
+                    f.len() - target as usize,
+                    "mode {mode} seek {target}"
+                );
+                assert!(
+                    g == &f[target as usize..],
+                    "mode {mode} seek {target} ch{c}: not identical to the full decode"
+                );
+            }
+        }
+    }
+}
