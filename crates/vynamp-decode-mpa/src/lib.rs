@@ -11,19 +11,20 @@
 //! `next_packet` yields one packet per frame with `pts = frame index * samples per frame`;
 //! `data` is the whole frame including its header. In `Mode::Strict` a lost sync or a
 //! truncated last frame is an error (bytes after the last frame that hold no further
-//! frame end the stream, as in FLAC; a Xing/VBRI frame count that is neither the number of frames found
-//! nor that number plus one (some encoders count the header frame) is
-//! `Invalid { what: "mpeg frame count" }`); in `Mode::Resilient` the lost span becomes silence
-//! packets (empty `data`, at most eight per gap) and one `Event::CorruptFrame`.
+//! frame end the stream, as in FLAC; a Xing/Info/VBRI frame count that is not the number of
+//! frames found, or that number plus one if the count could not be checked against the size of
+//! the audio (some encoders count the header frame), is `Invalid { what: "mpeg frame count" }`,
+//! also when more frames are found than declared); in `Mode::Resilient` the lost span becomes
+//! silence packets (empty `data`, at most eight per gap) and one `Event::CorruptFrame`.
 //!
 //! `seek` is exact and returns a start before the target. For Layer III the start is computed:
 //! the `main_data_begin` of the goal frame and of the two frames before it (the overlap of the
-//! inverse MDCT and the filterbank history of the goal's first granule) say how many bytes of earlier
-//! main data they need; the start is the earliest frame whose successors' main data covers all three
-//! (at most 32 frames back), so that the output from the goal on is identical to a decode from the
-//! start of the stream. For Layers I and II it is one frame earlier (the synthesis filterbank
-//! needs a frame to warm up). `SeekTo::preroll` is the number of samples to discard after
-//! decoding from there.
+//! inverse MDCT and the filterbank history of the goal's first granule) say how many bytes of
+//! earlier main data they need; the start is the earliest frame whose successors' main data
+//! covers all three (at most 32 frames back), so that the output from the goal on is identical
+//! to a decode from the start of the stream. For Layers I and II it is one frame earlier (the
+//! synthesis filterbank needs a frame to warm up). `SeekTo::preroll` is the number of samples to
+//! discard after decoding from there.
 #![warn(missing_docs)]
 
 mod demux;

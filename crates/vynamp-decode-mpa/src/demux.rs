@@ -10,11 +10,16 @@
 //! Strict mode turns a lost sync that is followed by a later frame into `Invalid { what:
 //! "mpeg sync" }` and a truncated final frame into `Invalid { what: "unexpected eof" }`. Bytes
 //! after the last frame that contain no further frame end the stream (Resilient mode reports
-//! them once); a Xing/VBRI frame count that is neither the number of frames found nor that number plus
-//! one is `Invalid { what: "mpeg frame count" }` (Resilient: `Event::Clamped`). A frame whose successor is not a header
-//! of the stream is checked against the next confirmed frame: if the damage does not fit a
-//! frame there, the frame's own header (and so its length) is wrong. Resilient mode looks for the next
-//! confirmed frame, reports the lost span as one `Event::CorruptFrame` (the number of lost
+//! them once). The frame count of a Xing/Info/VBRI header is checked when the stream ends: it
+//! must be the number of frames found (a count that includes the header frame is recognised at
+//! open by the size of the audio when an Info header allows constant bitrate arithmetic, and
+//! otherwise tolerated as one more than the frames found); any other count is `Invalid { what:
+//! "mpeg frame count" }` in Strict mode and `Event::Clamped` in Resilient mode, also when the
+//! stream holds more frames than declared (the header is inconsistent, and a reader that trusts
+//! it would cut audio). A count of 0 is treated as absent. A frame whose successor is not a
+//! header of the stream is checked against the next confirmed frame: if the damage does not fit
+//! a frame there, the frame's own header (and so its length) is wrong. Resilient mode looks for
+//! the next confirmed frame, reports the lost span as one `Event::CorruptFrame` (the number of lost
 //! frames estimated from the span and the last frame length), delivers at most eight frames
 //! of silence for it (packets with empty `data`) and moves the timeline over the rest.
 //!
@@ -107,6 +112,12 @@ pub struct MpaDemuxer {
     /// Free-format frame length without padding.
     free_base: Option<usize>,
     vbr: Option<VbrInfo>,
+    /// Audio frames the VBR header declares (the header frame excluded), if it gives a
+    /// non-zero count. See `declared_exact`.
+    declared: Option<u64>,
+    /// `declared` was checked against the size of the audio (constant bitrate arithmetic), and
+    /// is exactly the number of audio frames. Otherwise it may count the header frame too.
+    declared_exact: bool,
     cbr: Option<Cbr>,
     first_frame: u64,
     /// Absolute position where the audio ends (before any trailer); `u64::MAX` if unknown.
@@ -489,13 +500,15 @@ impl MpaDemuxer {
         self.last_bitrate = bitrate;
     }
 
-    /// Ends the stream. A Xing/VBRI frame count must equal the number of frames delivered, or
-    /// exceed it by one (some encoders count the header frame too). Anything else means the
-    /// stream was cut or extended: an error in Strict mode, `Clamped` in Resilient.
+    /// Ends the stream. The declared frame count (see `declared`) must equal the number of
+    /// frames delivered; when it could not be pinned down at open it may also exceed it by one
+    /// (some encoders count the header frame too). Anything else means the stream was cut or
+    /// extended, or its header lies: an error in Strict mode, `Clamped` in Resilient.
     fn finish(&mut self) -> Result<bool> {
         self.done = true;
-        if let Some(declared) = self.vbr.as_ref().and_then(|v| v.frames)
-            && !(self.idx..=self.idx + 1).contains(&u64::from(declared))
+        let slack = u64::from(!self.declared_exact);
+        if let Some(declared) = self.declared
+            && !(self.idx..=self.idx + slack).contains(&declared)
         {
             if self.strict() {
                 return Err(Error::Invalid {
@@ -506,7 +519,7 @@ impl MpaDemuxer {
             let actual = self.idx;
             self.event(Event::Clamped {
                 what: "mpeg frame count",
-                declared: u64::from(declared),
+                declared,
                 actual,
             });
         }
@@ -682,12 +695,21 @@ impl MpaDemuxer {
 /// `padding = lame padding - 529` (the decoder delay of 529 samples lies at the start of the
 /// output, so it counts as delay and comes off the padding), `frames` is the Xing frame count
 /// times the samples per frame, and `gapless` is `FromMetadata`: the trimmed length
-/// `frames - delay - padding` is the length of the encoded PCM. Gapless is exact only if the tag's padding is at least 529: a smaller
-/// padding cannot be taken from the decoder delay and saturates to 0 (the usual behaviour), so
-/// the output is then shorter than the encoded PCM by up to 529 samples (the tail was never encoded; FFmpeg trims the same way). A tag whose delay and padding do not fit the frame count is ignored and reported as `Event::GaplessConflict`. Without a LAME tag a Layer
-/// III track has `delay = 529` and `gapless = Unknown`; Layer I and II tracks have
-/// `delay = 481` (the synthesis filterbank delay; these layers carry no encoder delay
-/// metadata), `padding = 0` and `Unknown`.
+/// `frames - delay - padding` is the length of the encoded PCM. Gapless is exact only if the
+/// tag's padding is at least 529: a smaller padding cannot be taken from the decoder delay and
+/// saturates to 0 (the usual behaviour), so the output is then shorter than the encoded PCM by
+/// up to 529 samples (the tail was never encoded; FFmpeg trims the same way). A tag whose delay
+/// and padding do not fit the frame count is ignored and reported as `Event::GaplessConflict`.
+///
+/// The frame count is the number of audio frames, the header frame excluded (LAME and FFmpeg).
+/// A count of 0 is treated as absent (`frames` is `None`). A count that includes the header
+/// frame is recognised when the Info header of a constant bitrate stream agrees with the size
+/// of the audio; then `frames` is one frame less than declared. Without that check the count
+/// is taken as it is, and the end of the stream may exceed it by one frame.
+///
+/// Without a LAME tag a Layer III track has `delay = 529` and `gapless = Unknown`; Layer I and
+/// II tracks have `delay = 481` (the synthesis filterbank delay; these layers carry no encoder
+/// delay metadata), `padding = 0` and `Unknown`.
 ///
 /// # Errors
 /// `Invalid { what: "mpeg sync" }` if no frame is found, limit errors, source errors.
@@ -707,6 +729,8 @@ pub fn open_mpa(mut src: Box<dyn Source>, opts: &Options) -> Result<MpaDemuxer> 
         ref_h: placeholder,
         free_base: None,
         vbr: None,
+        declared: None,
+        declared_exact: false,
         cbr: None,
         first_frame: start,
         audio_end,
@@ -758,9 +782,27 @@ pub fn open_mpa(mut src: Box<dyn Source>, opts: &Options) -> Result<MpaDemuxer> 
     opts.limits.check_sample_rate(h.sample_rate)?;
     opts.limits.check_channels(h.channels())?;
     let spf = u64::from(h.samples);
+    // A count of 0 is as good as none. A count that includes the header frame (a writer that
+    // counts it, unlike LAME and FFmpeg) is recognised by the size of the audio: Info headers
+    // of constant bitrate streams allow arithmetic (see `detect_cbr`); without it the count is
+    // taken as it is and the end of the stream may exceed it by one frame.
+    let raw = d
+        .vbr
+        .as_ref()
+        .and_then(|v| v.frames)
+        .filter(|&n| n != 0)
+        .map(u64::from);
+    d.declared = raw;
+    if let Some(raw) = raw
+        && let Some((cbr, n)) = d.detect_cbr(raw)
+    {
+        d.cbr = Some(cbr);
+        d.declared = Some(n);
+        d.declared_exact = true;
+    }
     let mut frames = None;
-    if let Some(n) = d.vbr.as_ref().and_then(|v| v.frames) {
-        let total = u64::from(n).saturating_mul(spf);
+    if let Some(n) = d.declared {
+        let total = n.saturating_mul(spf);
         opts.limits.check_frames(total)?;
         frames = Some(total);
     }
@@ -804,26 +846,22 @@ pub fn open_mpa(mut src: Box<dyn Source>, opts: &Options) -> Result<MpaDemuxer> 
         gapless,
         codec_private: Vec::new(),
     });
-    d.cbr = d.detect_cbr()?;
     Ok(d)
 }
 
 impl MpaDemuxer {
     /// Constant bitrate arithmetic is used only when an Info header (CBR writers' tag) gives a
-    /// frame count, the stream is not free format, and the audio size agrees with that count
-    /// at the bitrate of the first audio frame to within a few slots.
-    fn detect_cbr(&mut self) -> Result<Option<Cbr>> {
+    /// frame count `declared`, the stream is not free format, and the audio size agrees with
+    /// that count, or with that count less the header frame it may include, at the bitrate of the
+    /// first audio frame to within a few slots. Returns the arithmetic and the number of audio
+    /// frames that agreed.
+    fn detect_cbr(&self, declared: u64) -> Option<(Cbr, u64)> {
         use crate::vbr::VbrKind;
         let h = self.ref_h;
         let end = self.audio_end;
-        let Some(v) = self.vbr.as_ref() else {
-            return Ok(None);
-        };
-        let Some(frames) = v.frames else {
-            return Ok(None);
-        };
+        let v = self.vbr.as_ref()?;
         if v.kind != VbrKind::Info || h.bitrate_kbps == 0 || end == u64::MAX || h.layer != 3 {
-            return Ok(None);
+            return None;
         }
         let coefficient = match h.version {
             MpegVersion::V1 => 144,
@@ -835,10 +873,12 @@ impl MpaDemuxer {
             coefficient,
             slot: h.slot_size(),
         };
-        let expected = cbr.estimate(u64::from(frames));
         let actual = end.saturating_sub(self.first_frame);
         let slack = 4 * h.slot_size() as u64;
-        Ok((expected.abs_diff(actual) <= slack).then_some(cbr))
+        [declared, declared - 1]
+            .into_iter()
+            .find(|&n| cbr.estimate(n).abs_diff(actual) <= slack)
+            .map(|n| (cbr, n))
     }
 }
 

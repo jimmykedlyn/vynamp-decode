@@ -42,12 +42,29 @@ dev-time tool: it writes the fixtures (`tools/fixtures/generate-mpeg-dev.ps1`) a
   ignored.
 - Seek preroll: a Layer III frame starts its main data `main_data_begin` bytes (9 bits in
   MPEG-1, 8 in MPEG-2/2.5, at most 511 bytes) before its own, inside the main data of earlier
-  frames. The demuxer reads `main_data_begin` of the goal frame and steps back over earlier
-  frames, adding up their main data (frame length minus header, CRC and side information),
-  until it covers that; one more frame is added for the IMDCT overlap and the total is capped at
-  32 frames. Layers I and II have no reservoir; one frame warms the synthesis filterbank up. The
-  decoder task checks the figures against its output.
+  frames. The demuxer reads `main_data_begin` of the goal frame and of the two frames before it
+  (the IMDCT of a granule overlaps the previous one, and the polyphase filterbank keeps 16 slots
+  of history, so the goal's first granule is exact only if the two granules before it were
+  decoded from real data) and steps back over earlier frames, adding up their main data (frame
+  length minus header, CRC and side information), until each of the three is covered; the
+  earliest start is taken and the total is capped at 32 frames. Layers I and II have no
+  reservoir; one frame warms the synthesis filterbank up. The facade test
+  `decode_after_seek_equals_the_full_decode_slice` shows the output after a seek is identical
+  to the full decode (the first version, goal frame only, was wrong by up to 0.35 at 8 kbit/s).
 - Gapless is exact only if the LAME padding is at least 529; a smaller one saturates to 0.
+- Frame count rules. The Xing/Info/VBRI frame count is the number of audio frames, the header
+  frame excluded (LAME and FFmpeg write it so: the committed fixtures declare exactly the number
+  of frames delivered, and their `bytes` field includes the header frame, so `bytes` cannot tell
+  whether the count includes it). A writer that counts the header frame is recognised at open
+  for constant bitrate Info headers by the audio size (the count or the count less one matches
+  the bytes of audio at the stream's bitrate within four slots); `Track::frames` is then the
+  audio frames. Where that cannot be checked, delivered == declared or delivered + 1 == declared
+  is accepted at the end of the stream. Anything else (fewer frames, or more frames than
+  declared, which a Reader that trusts the count would silently truncate) is Strict
+  `Invalid { what: "mpeg frame count" }` and Resilient `Event::Clamped`. A count of 0 is
+  treated as absent (`Track::frames` is `None`, no check, no gapless numbers). Note that a
+  `Reader` stops at the declared end for tracks with padding, so the over-long case is reported
+  to consumers that read the demuxer to its end.
 - ID3v2, ID3v1, APEv2 and Lyrics3v2 tags are handled by the core `skip_id3v2` and
   `find_trailers`.
 
@@ -168,7 +185,7 @@ and two interpretation details were taken from the public-domain (CC0) `minimp3`
   reference decoder treats it). Illegal bands fall back to MS (if on) or L/R.
 - **Oracle alignment.** Fixtures are libmp3lame encodes written without Xing/LAME tag
   (`-write_xing 0`, empty ID3v2 header cut off). With a tag FFmpeg's demuxer makes the decoder
-  skip the encoder delay + 529 + 1 samples and the padding (a tagged 0.3 s encode decodes to
+  skip the encoder delay + 529 (528 + 1) samples and the padding (a tagged 0.3 s encode decodes to
   exactly 13230 frames); without it `mp3float` outputs every sample of every frame, which is
   compared with our untrimmed output at offset 0. Lags of +-1 are asserted to be far worse.
 - LAME emits neither intensity stereo nor mixed blocks: both are checked on hand-assembled

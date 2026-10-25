@@ -513,32 +513,42 @@ fn a_frame_with_impossible_side_information_is_an_error_or_silence() {
     );
 }
 
+/// CRC-16/ARC (the LAME tag checksum).
+fn arc(data: &[u8]) -> u16 {
+    let mut crc = 0u16;
+    for &b in data {
+        crc ^= u16::from(b);
+        for _ in 0..8 {
+            crc = if crc & 1 != 0 {
+                (crc >> 1) ^ 0xA001
+            } else {
+                crc >> 1
+            };
+        }
+    }
+    crc
+}
+
+/// `g-cbr128-48k-stereo.mp3` with the frame count of its Info header (and, if given, the
+/// padding of its LAME tag) rewritten and the tag checksum fixed so that the tag stays trusted.
+fn with_info(frames: u32, padding: Option<u16>) -> Vec<u8> {
+    let mut data = std::fs::read(gapless("g-cbr128-48k-stereo.mp3")).unwrap();
+    let info = data.windows(4).position(|w| w == b"Info").unwrap();
+    let o = info + 120; // after the flags, frames, bytes, TOC and quality fields
+    data[info + 8..info + 12].copy_from_slice(&frames.to_be_bytes());
+    if let Some(p) = padding {
+        data[o + 22] = (data[o + 22] & 0xF0) | (p >> 8) as u8;
+        data[o + 23] = p as u8;
+    }
+    let crc = arc(&data[info - 36..o + 34]);
+    data[o + 34..o + 36].copy_from_slice(&crc.to_be_bytes());
+    data
+}
+
 #[test]
 fn the_reader_reports_conflicting_gapless_information() {
     // An Info header declaring 3 frames cannot hold the delay and padding of its LAME tag.
-    fn arc(data: &[u8]) -> u16 {
-        let mut crc = 0u16;
-        for &b in data {
-            crc ^= u16::from(b);
-            for _ in 0..8 {
-                crc = if crc & 1 != 0 {
-                    (crc >> 1) ^ 0xA001
-                } else {
-                    crc >> 1
-                };
-            }
-        }
-        crc
-    }
-    let mut data = std::fs::read(gapless("g-cbr128-48k-stereo.mp3")).unwrap();
-    let info = data.windows(4).position(|w| w == b"Info").unwrap();
-    let o = info + 120;
-    data[info + 8..info + 12].copy_from_slice(&3u32.to_be_bytes());
-    data[o + 22] = (data[o + 22] & 0xF0) | 0x0F;
-    data[o + 23] = 0xFF;
-    let crc = arc(&data[info - 36..o + 34]);
-    data[o + 34..o + 36].copy_from_slice(&crc.to_be_bytes());
-    let mut r = reader_of(data, Mode::Resilient);
+    let mut r = reader_of(with_info(3, Some(0xFFF)), Mode::Resilient);
     assert_eq!(r.track().gapless, GaplessKind::Unknown);
     assert_eq!(
         r.take_events(),
@@ -546,6 +556,52 @@ fn the_reader_reports_conflicting_gapless_information() {
             what: "lame tag exceeds frame count"
         }]
     );
+}
+
+#[test]
+fn an_info_header_that_counts_its_own_frame_still_gives_the_exact_length() {
+    // The file has 14 audio frames; the tag says 15, counting the Info frame. The output must
+    // still be the 14400 frames that were encoded, and Strict mode must reach the end cleanly.
+    let (_, plain) = decode(&gapless("g-cbr128-48k-stereo.mp3"));
+    for declared in [14, 15] {
+        for mode in [Mode::Strict, Mode::Resilient] {
+            let mut r = reader_of(with_info(declared, None), mode);
+            assert_eq!(r.track().frames, Some(14 * 1152), "declared {declared}");
+            assert_eq!(r.track().gapless, GaplessKind::FromMetadata);
+            assert_eq!(r.frames(), Some(14400), "declared {declared}");
+            let (planes, res) = drain(&mut r);
+            assert_eq!(res, Ok(()), "declared {declared} {mode:?}");
+            assert!(planes == plain, "declared {declared} {mode:?}");
+            assert!(r.take_events().is_empty(), "declared {declared} {mode:?}");
+        }
+    }
+}
+
+#[test]
+fn the_output_is_aligned_with_the_source_pcm_to_the_sample() {
+    // Correlation of the output with the source PCM over lags -3..=3 peaks at lag 0.
+    for name in GAPLESS {
+        let (r, planes) = decode(&gapless(&format!("{name}.mp3")));
+        let src = read_wav16(
+            &gapless(&format!("{name}.src.wav")),
+            usize::from(r.track().channels),
+        );
+        let mut best = (f64::MIN, 0isize);
+        for lag in -3isize..=3 {
+            let mut corr = 0.0f64;
+            for (g, s) in planes.iter().zip(&src) {
+                for (i, &x) in g.iter().enumerate() {
+                    if let Some(&y) = i.checked_add_signed(lag).and_then(|j| s.get(j)) {
+                        corr += f64::from(x) * f64::from(y);
+                    }
+                }
+            }
+            if corr > best.0 {
+                best = (corr, lag);
+            }
+        }
+        assert_eq!(best.1, 0, "{name}: the best lag against the source PCM");
+    }
 }
 
 #[test]

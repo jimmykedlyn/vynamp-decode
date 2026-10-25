@@ -6,7 +6,7 @@
 //! FFmpeg's `mp3float` decode of the same file as raw interleaved little-endian f32.
 //!
 //! **Alignment.** With a LAME tag FFmpeg's demuxer tells the decoder to skip the encoder delay
-//! plus 529 + 1 samples at the start and to cut the padding at the end (a tagged 0.3 s encode
+//! plus 529 (528 + 1) samples at the start and to cut the padding at the end (a tagged 0.3 s encode
 //! decodes to exactly 13230 frames). Without the tag it drops nothing: the reference holds
 //! `frames * samples per frame` samples per channel and starts with the first sample of the
 //! first frame. The decoder under test also trims nothing (gapless trimming is the reader's
@@ -481,4 +481,44 @@ fn a_gap_empties_the_reservoir_and_the_frames_after_it_are_silent_not_garbage() 
     let mut ev = Vec::new();
     d.drain_events(&mut ev);
     assert!(ev.is_empty());
+}
+
+#[test]
+fn a_damaged_first_frame_is_an_error_even_where_missing_reservoir_data_is_tolerated() {
+    // The lead-in tolerance covers missing reservoir bytes only, not frames that cannot be
+    // decoded: part2_3_length of granule 0, channel 0 is set to 4095 bits, more than the frame
+    // holds.
+    let fx = &FIXTURES[0];
+    let data = fixture(&format!("{}.mp3", fx.name));
+    let frames = split_frames(&data);
+    let damage = |f: &[u8]| {
+        let mut bad = f.to_vec();
+        bad[6] |= 0x0F;
+        bad[7] = 0xFF;
+        bad
+    };
+    // A first frame that starts the stream with all its data (main_data_begin 0) ...
+    assert_eq!(main_data_begin(frames[0].1), 0);
+    // ... and one that points back before the start (the lead-in), with a small
+    // main_data_begin so that 4095 bits cannot fit.
+    let k = (1..frames.len())
+        .find(|&k| (1..100).contains(&main_data_begin(frames[k].1)))
+        .expect("a frame with a small main_data_begin");
+    for (offset, f) in [frames[0], frames[k]] {
+        let mut out = AudioBuffer::new();
+        let err = dec(fx.rate, 2, Mode::Strict)
+            .decode(&packet_of(&damage(f), offset, 0), &mut out)
+            .unwrap_err();
+        assert!(
+            matches!(err, Error::Invalid { what: "mp3 huffman", offset: o } if o >= offset),
+            "{err:?}"
+        );
+        // Resilient: reported, not silently tolerated.
+        let mut d = dec(fx.rate, 2, Mode::Resilient);
+        d.decode(&packet_of(&damage(f), offset, 0), &mut out)
+            .unwrap();
+        let mut ev = Vec::new();
+        d.drain_events(&mut ev);
+        assert_eq!(ev.len(), 1, "{ev:?}");
+    }
 }

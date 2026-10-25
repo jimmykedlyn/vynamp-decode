@@ -78,7 +78,7 @@ Write-Host "wrote $($l2cases.Count) Layer II fixtures to $mp3out"
 # little-endian f32. The encodes carry NO Xing/Info/LAME tag (`-write_xing 0`) and the empty
 # ID3v2 header that FFmpeg's muxer writes is cut off, so the files start with the first frame.
 # With a LAME tag FFmpeg's demuxer asks the decoder to skip
-# the encoder delay plus 529+1 samples at the start (and the padding at the end), so the
+# the encoder delay plus 529 (528 + 1) samples at the start (and the padding at the end), so the
 # reference would be trimmed. Without it FFmpeg drops nothing and its output starts with the
 # first sample of the first frame, the same alignment as the untrimmed output of the decoder
 # under test (offset 0, whole frames).
@@ -136,7 +136,7 @@ Write-Host "wrote $($l3cases.Count) Layer III fixtures to $mp3out"
 # WAV (`<name>.src.wav`), the libmp3lame encode of exactly that WAV WITH FFmpeg's Xing/Info and
 # LAME tag (`<name>.mp3`; the tag carries the encoder delay and padding), and FFmpeg's own
 # gapless decode of the MP3 by `mp3float` (`<name>.ref.f32`, raw interleaved little-endian f32):
-# FFmpeg's demuxer reads the LAME tag and trims the encoder delay + 529 + 1 samples at the start
+# FFmpeg's demuxer reads the LAME tag and trims the encoder delay + 529 (528 + 1) samples at the start
 # and the padding at the end. The facade tests compare the Reader's output against both.
 $gout = Join-Path $root 'crates/vynamp-decode/tests/fixtures/mpeg'
 New-Item -ItemType Directory -Force $gout | Out-Null

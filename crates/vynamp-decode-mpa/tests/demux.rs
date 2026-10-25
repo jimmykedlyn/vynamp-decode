@@ -518,7 +518,8 @@ fn free_format_streams_are_measured() {
 // ---------------------------------------------------------------- seek
 
 fn check_seeks(name: &str, data: &[u8], opts: &Options) {
-    // The packets as Resilient mode delivers them: a header that lies about the frame count\n    // is reported there but does not change them.
+    // The packets as Resilient mode delivers them: a header that lies about the frame count
+    // is reported there but does not change them.
     let pkts = {
         let (p, r, _) = read_all(&mut open(data.to_vec(), &resilient()));
         assert_eq!(r, Ok(()));
@@ -1136,7 +1137,8 @@ fn a_stream_shorter_than_its_declared_frame_count() {
             actual: 100
         }]
     );
-    // A cut inside the next header leaves stray bytes: the count catches it. (One frame short\n    // is within the tolerance for encoders that count the header frame, so cut two.)
+    // A cut inside the next header leaves stray bytes: the count catches it. (One frame short
+    // is within the tolerance for encoders that count the header frame, so cut two.)
     let last = &pkts[pkts.len() - 2];
     let stray = plain[..last.offset as usize + 2].to_vec();
     let mut d = open(stray, &strict());
@@ -1280,5 +1282,44 @@ fn a_consistent_tag_and_an_untagged_stream_report_no_conflict() {
         let mut ev = Vec::new();
         d.drain_events(&mut ev);
         assert!(ev.is_empty(), "{name}: {ev:?}");
+    }
+}
+
+// ---------------------------------------------------------------- Info frame counted in the frame count
+
+#[test]
+fn a_constant_bitrate_count_that_includes_the_info_frame_is_normalised_at_open() {
+    // The audio of the fixture is 126 frames. An Info header declaring 127 counts its own
+    // frame: the bytes of the audio say so (constant bitrate arithmetic), so the track holds
+    // 126 frames and the stream must end exactly there.
+    let mut d = open(with_tag(127, 576, 1000), &strict());
+    let t = d.tracks()[0].clone();
+    assert_eq!(t.frames, Some(126 * 1152));
+    assert_eq!(t.gapless, GaplessKind::FromMetadata);
+    let (pkts, r, ev) = read_all(&mut d);
+    assert_eq!((r, pkts.len(), ev.len()), (Ok(()), 126, 0));
+    // The plain count is left alone.
+    let d = open(with_tag(126, 576, 1000), &strict());
+    assert_eq!(d.tracks()[0].frames, Some(126 * 1152));
+}
+
+#[test]
+fn a_zero_or_missing_frame_count_means_no_declared_length() {
+    // 0 frames is as good as absent: no length, no gapless numbers, no check at the end.
+    let mut d = open(with_tag(0, 576, 1000), &strict());
+    let t = d.tracks()[0].clone();
+    assert_eq!((t.frames, t.gapless), (None, GaplessKind::Unknown));
+    assert_eq!((t.delay, t.padding), (529, 0));
+    let (pkts, r, ev) = read_all(&mut d);
+    assert_eq!((r, pkts.len(), ev.len()), (Ok(()), 126, 0));
+    // No frames field at all (flags 0).
+    let mut data = fixture("cbr128-48k-stereo.mp3");
+    let info = data.windows(4).position(|w| w == b"Info").unwrap();
+    data[info + 4..info + 8].fill(0);
+    for opts in [strict(), resilient()] {
+        let mut d = open(data.clone(), &opts);
+        assert_eq!(d.tracks()[0].frames, None);
+        let (pkts, r, ev) = read_all(&mut d);
+        assert_eq!((r, pkts.len(), ev.len()), (Ok(()), 126, 0));
     }
 }
