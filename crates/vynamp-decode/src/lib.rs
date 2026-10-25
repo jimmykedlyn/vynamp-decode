@@ -73,16 +73,30 @@ pub static FLAC_CODEC: CodecDescriptor = CodecDescriptor {
     },
 };
 
-/// Descriptor of the MPEG audio codec: Layers I, II and III of MPEG-1, MPEG-2 and MPEG-2.5.
+/// Descriptor of the MPEG audio codec for Layers II and III of MPEG-1, MPEG-2 and MPEG-2.5.
 ///
-/// Verified against FFmpeg's floating point decoders under the ISO/IEC 11172-4 full accuracy
-/// criterion (RMS error below 2^-15 / sqrt(12), maximum error at most 2^-14); the ISO
-/// conformance streams are not available, hence `Oracle` rather than `Conformance`.
+/// Verified against FFmpeg's floating point decoders (`mp2float`, `mp3float`) under the ISO/IEC
+/// 11172-4 full accuracy criterion (RMS error below 2^-15 / sqrt(12), maximum error at most
+/// 2^-14) on the oracle corpus; the ISO conformance streams are not redistributable, hence
+/// `Oracle` rather than `Conformance`.
 #[cfg(feature = "mp3")]
 pub static MPEG_AUDIO_CODEC: CodecDescriptor = CodecDescriptor {
     name: "mpeg-audio",
     verification: Verification::Oracle,
-    supports: |id| matches!(id, CodecId::Mp1 | CodecId::Mp2 | CodecId::Mp3),
+    supports: |id| matches!(id, CodecId::Mp2 | CodecId::Mp3),
+    make: |track, opts| Ok(Box::new(vynamp_decode_mp3::MpegDecoder::new(track, opts)?)),
+};
+
+/// Descriptor of the MPEG audio codec for Layer I.
+///
+/// `Experimental`: FFmpeg has no Layer I encoder, so there is no real-world Layer I file and no
+/// third-party oracle; the decoder is tested with hand-assembled frames against an independent
+/// reference chain only.
+#[cfg(feature = "mp3")]
+pub static MPEG_AUDIO_LAYER1_CODEC: CodecDescriptor = CodecDescriptor {
+    name: "mpeg-audio-layer1",
+    verification: Verification::Experimental,
+    supports: |id| matches!(id, CodecId::Mp1),
     make: |track, opts| Ok(Box::new(vynamp_decode_mp3::MpegDecoder::new(track, opts)?)),
 };
 
@@ -104,6 +118,8 @@ pub fn default_registry() -> Registry {
     reg.add_codec(&FLAC_CODEC);
     #[cfg(feature = "mp3")]
     reg.add_codec(&MPEG_AUDIO_CODEC);
+    #[cfg(feature = "mp3")]
+    reg.add_codec(&MPEG_AUDIO_LAYER1_CODEC);
     reg
 }
 

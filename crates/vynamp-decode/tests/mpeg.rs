@@ -532,8 +532,14 @@ fn arc(data: &[u8]) -> u16 {
 /// `g-cbr128-48k-stereo.mp3` with the frame count of its Info header (and, if given, the
 /// padding of its LAME tag) rewritten and the tag checksum fixed so that the tag stays trusted.
 fn with_info(frames: u32, padding: Option<u16>) -> Vec<u8> {
-    let mut data = std::fs::read(gapless("g-cbr128-48k-stereo.mp3")).unwrap();
-    let info = data.windows(4).position(|w| w == b"Info").unwrap();
+    with_tag_of("g-cbr128-48k-stereo.mp3", b"Info", frames, padding)
+}
+
+/// Like [`with_info`] for any gapless fixture whose Xing/Info header carries the frame count
+/// (flag bit 0), the byte count, the TOC and the quality field.
+fn with_tag_of(file: &str, tag: &[u8; 4], frames: u32, padding: Option<u16>) -> Vec<u8> {
+    let mut data = std::fs::read(gapless(file)).unwrap();
+    let info = data.windows(4).position(|w| w == tag).unwrap();
     let o = info + 120; // after the flags, frames, bytes, TOC and quality fields
     data[info + 8..info + 12].copy_from_slice(&frames.to_be_bytes());
     if let Some(p) = padding {
@@ -573,6 +579,37 @@ fn an_info_header_that_counts_its_own_frame_still_gives_the_exact_length() {
             assert_eq!(res, Ok(()), "declared {declared} {mode:?}");
             assert!(planes == plain, "declared {declared} {mode:?}");
             assert!(r.take_events().is_empty(), "declared {declared} {mode:?}");
+        }
+    }
+}
+
+#[test]
+fn a_vbr_count_that_includes_the_info_frame_is_tolerated_without_an_event() {
+    // A variable bitrate file cannot be checked against the size of its audio, so a count that
+    // includes the Info frame (delivered + 1) is taken as it is: the demuxer accepts the end of
+    // the stream one frame short, in Strict mode too. Any other count is an error.
+    let name = "g-vbr2-48k-stereo.mp3";
+    let (plain_reader, plain) = decode(&gapless(name));
+    let delivered = plain_reader.track().frames.unwrap() / 1152;
+    for mode in [Mode::Strict, Mode::Resilient] {
+        let data = with_tag_of(name, b"Xing", delivered as u32 + 1, None);
+        let mut r = reader_of(data, mode);
+        assert_eq!(r.track().frames, Some((delivered + 1) * 1152), "{mode:?}");
+        let (planes, res) = drain(&mut r);
+        assert_eq!(res, Ok(()), "{mode:?}");
+        assert!(r.take_events().is_empty(), "{mode:?}");
+        // The declared total is one frame longer than the audio, so the trailing padding that
+        // the LAME tag asks to trim lies beyond the data and stays: the output is the plain one
+        // plus that padding (the cost of tolerating the count; no way to tell the cases apart).
+        let padding = plain_reader.track().padding as usize;
+        assert!(padding > 0);
+        assert_eq!(planes[0].len(), plain[0].len() + padding, "{mode:?}");
+        assert!(planes[0][..plain[0].len()] == plain[0][..], "{mode:?}");
+        // Two frames too many is a contradiction, not a tolerated off-by-one.
+        let data = with_tag_of(name, b"Xing", delivered as u32 + 2, None);
+        let (_, res) = drain(&mut reader_of(data, mode));
+        if mode == Mode::Strict {
+            assert!(res.is_err(), "strict accepted delivered + 2");
         }
     }
 }

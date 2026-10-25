@@ -843,13 +843,12 @@ fn reader_is_send() {
 
 #[test]
 fn builtin_formats_have_the_expected_verification_level() {
-    // FLAC has official conformance vectors (IETF flac-test-files); PCM has none.
-    let want = |name: &str| {
-        if name == "flac" {
-            Verification::Conformance
-        } else {
-            Verification::Oracle
-        }
+    // FLAC has official conformance vectors (IETF flac-test-files); PCM has none; Layer I has
+    // no real-world fixture and no third-party oracle (FFmpeg has no Layer I encoder).
+    let want = |name: &str| match name {
+        "flac" => Verification::Conformance,
+        "mpeg-audio-layer1" => Verification::Experimental,
+        _ => Verification::Oracle,
     };
     let reg = default_registry();
     assert!(reg.containers().all(|c| c.verification == want(c.name)));

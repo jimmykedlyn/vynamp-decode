@@ -702,6 +702,8 @@ impl MpaDemuxer {
 /// and padding do not fit the frame count is ignored and reported as `Event::GaplessConflict`.
 ///
 /// The frame count is the number of audio frames, the header frame excluded (LAME and FFmpeg).
+/// A CBR file truncated by exactly one frame matches the declared-1 reading and is normalised
+/// silently.
 /// A count of 0 is treated as absent (`frames` is `None`). A count that includes the header
 /// frame is recognised when the Info header of a constant bitrate stream agrees with the size
 /// of the audio; then `frames` is one frame less than declared. Without that check the count

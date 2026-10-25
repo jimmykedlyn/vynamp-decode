@@ -26,3 +26,10 @@
   (`CorruptFrame` and silence for undecodable frames, `GaplessConflict` for a LAME tag that does not
   fit the frame count). A Xing/VBRI frame count must equal the frames delivered or exceed them by
   one. `Decoder::set_preroll` tells a decoder the seek preroll. Verification level `oracle`.
+- MPEG audio oracle corpus (FFmpeg-generated, dev-only; 12 Layer II files covering allocation
+  tables A, B, C, D and the MPEG-2 LSF table, 21 Layer III files covering CBR, VBR, ABR, mono,
+  joint stereo, MPEG-2 and MPEG-2.5, each with the f32 decode of FFmpeg's `mp2float`/`mp3float`;
+  3.0 MiB), checked against the ISO/IEC 11172-4 full accuracy criterion. The ISO compliance
+  bitstreams are not redistributable and are not used: Layers II and III are `oracle`; Layer I is
+  `experimental` and now has its own codec descriptor, `mpeg-audio-layer1`. MP3 decode benchmark
+  (about 160x to 235x realtime for 44.1 kHz stereo) in the book.

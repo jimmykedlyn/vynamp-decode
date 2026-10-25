@@ -38,6 +38,38 @@ Caveats:
   not typical music.
 - Results vary with CPU frequency scaling and background load.
 
+## MPEG audio
+
+The oracle fixtures are too short to time, so the benchmark files are generated when
+the benchmark is run and are **not committed** (they would exceed the fixture budget). Each is
+30 s of the synthetic signal of the oracle corpus (tones, a gliding tone, noise, short bursts),
+encoded by FFmpeg n8.1.3-23-g5c4f5744cd (libmp3lame and the native `mp2` encoder) into a scratch
+directory outside the repository:
+
+```text
+S="aevalsrc=<rich0>|<rich1>:s=44100:d=30"   # the 'rich' expressions of tools/fixtures/generate.ps1
+ffmpeg -f lavfi -i "$S" -c:a libmp3lame -b:a 128k cbr128-44k-30s.mp3
+ffmpeg -f lavfi -i "$S" -c:a libmp3lame -q:a 2    vbr-v2-44k-30s.mp3
+ffmpeg -f lavfi -i "$S" -c:a libmp3lame -b:a 320k cbr320-44k-30s.mp3
+ffmpeg -f lavfi -i "$S" -c:a mp2 -b:a 192k        mp2-192k-44k-30s.mp2
+ffmpeg -f lavfi -i "aevalsrc=<rich0>:s=22050:d=30" -c:a libmp3lame -b:a 48k mono-22k-48k-30s.mp3
+```
+
+Same machine and toolchain as above (Intel Core i5-8350U @ 1.70 GHz, Windows 11 Pro 10.0.26300,
+rustc 1.99.0 (b940084d7 2026-09-28), release profile), 20 iterations each, single thread:
+
+| File | Input | Format | Min | Median |
+|------|------:|--------|-----|--------|
+| `cbr128-44k-30s.mp3` | 481,115 B | Layer III CBR 128 kbit/s stereo 44.1 kHz, 1,323,000 frames | 3.8 MB/s, 234x | 3.1 MB/s, 196x |
+| `vbr-v2-44k-30s.mp3` | 1,068,412 B | Layer III VBR -V2 stereo 44.1 kHz | 7.6 MB/s, 213x | 5.8 MB/s, 163x |
+| `cbr320-44k-30s.mp3` | 1,202,721 B | Layer III CBR 320 kbit/s stereo 44.1 kHz | 8.0 MB/s, 199x | 6.3 MB/s, 158x |
+| `mono-22k-48k-30s.mp3` | 180,628 B | Layer III MPEG-2 mono 22.05 kHz 48 kbit/s | 5.3 MB/s, 885x | 4.4 MB/s, 733x |
+| `mp2-192k-44k-30s.mp2` | 720,352 B | Layer II 192 kbit/s stereo 44.1 kHz | 8.9 MB/s, 371x | 5.6 MB/s, 233x |
+
+MP3 decoding of 44.1 kHz stereo therefore runs at roughly 160x to 235x realtime. The gap between
+min and median (about 20 to 40 percent) is CPU frequency scaling and background load on a
+laptop; the file I/O is included.
+
 ## Future work
 
 A comparison against Symphonia on the same files would put these numbers in
