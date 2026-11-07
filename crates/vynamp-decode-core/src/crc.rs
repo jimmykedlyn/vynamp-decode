@@ -1,4 +1,4 @@
-//! FLAC CRC-8 and CRC-16 (RFC 9639 section 9.1.8 and 9.3).
+//! CRC-8 and CRC-16: FLAC (RFC 9639 section 9.1.8 and 9.3) and the MPEG audio header CRC.
 
 const fn make_table8(poly: u8) -> [u8; 256] {
     let mut table = [0u8; 256];
@@ -74,4 +74,14 @@ pub fn crc16_update(crc: u16, data: &[u8]) -> u16 {
     data.iter().fold(crc, |crc, &b| {
         (crc << 8) ^ TABLE16[usize::from((crc >> 8) as u8 ^ b)]
     })
+}
+
+/// CRC-16 as used by the MPEG audio frame header: polynomial `0x8005`, initial value
+/// `0xFFFF`, MSB-first, no reflection, no final XOR.
+///
+/// ```
+/// assert_eq!(vynamp_decode_core::crc16_mpeg(b"123456789"), 0xAEE7);
+/// ```
+pub fn crc16_mpeg(data: &[u8]) -> u16 {
+    crc16_update(0xFFFF, data)
 }

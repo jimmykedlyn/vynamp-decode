@@ -15,13 +15,14 @@ mod registry;
 mod sample;
 mod source;
 mod track;
+mod trailer;
 mod traits;
 
 pub use bits::BitReader;
 pub use buffer::AudioBuffer;
 pub use bytes::ByteReader;
 pub use cancel::{CancelSource, CancelToken};
-pub use crc::{crc8, crc16, crc16_update};
+pub use crc::{crc8, crc16, crc16_mpeg, crc16_update};
 pub use error::{Error, LimitKind, Result};
 pub use event::Event;
 pub use limits::{Limits, Mode, Options};
@@ -33,4 +34,5 @@ pub use registry::{
 pub use sample::{Endian, PcmEncoding, PcmSpec, SampleFormat};
 pub use source::{FileSource, SliceSource, Source, VecSource};
 pub use track::{CodecId, GaplessKind, Track};
+pub use trailer::{Trailer, TrailerKind, find_trailers};
 pub use traits::{Decoder, Demuxer, SeekTo};

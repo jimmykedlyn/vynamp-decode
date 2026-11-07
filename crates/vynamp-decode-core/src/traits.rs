@@ -34,6 +34,12 @@ pub trait Decoder: Send {
     fn decode(&mut self, packet: &Packet, out: &mut AudioBuffer) -> Result<()>;
     /// Clears internal state (e.g. after a seek).
     fn reset(&mut self);
+    /// Announces, after [`reset`](Self::reset), the seek preroll: packets whose frames all lie
+    /// before timeline position `until` are decoded only to warm the decoder up and their output
+    /// is discarded, so a decoder that lacks context for them (a bit reservoir that points
+    /// before the packet it starts with) may output silence for them without reporting damage.
+    /// `until` is `SeekTo::frame + SeekTo::preroll`. The default ignores it.
+    fn set_preroll(&mut self, _until: u64) {}
     /// Moves pending diagnostic events into `out`. The default reports none.
     fn drain_events(&mut self, _out: &mut Vec<Event>) {}
 }

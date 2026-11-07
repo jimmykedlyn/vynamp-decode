@@ -58,6 +58,29 @@ VYNAMP_FLAC_TEST_FILES=<dir> cargo test -p vynamp-decode --release --test confor
 With the default limits all 67 files pass. Because FLAC passes its official vectors, its
 container and codec are `conformance` in the support matrix.
 
+## MPEG audio oracle corpus
+
+`tests/fixtures/mpeg/` holds 12 Layer II and 21 Layer III files written by FFmpeg (native `mp2`,
+libtwolame for joint stereo with CRC, libmp3lame) from synthetic signals, each next to FFmpeg's own
+floating point decode (`mp2float`, `mp3float`) as raw f32; `MANIFEST.txt` records both SHA-256
+sums, the exact encoder arguments and FFmpeg's version line. Layer II covers all four MPEG-1
+allocation tables (A and B at 44.1/48/32 kHz and 128 to 384 kbit/s, C at 48 kHz and 64 to 96
+kbit/s, D at 32 kHz) and the MPEG-2 LSF table (24, 22.05 and 16 kHz); the test re-derives the
+table from each file's headers and compares it with the manifest. Layer III covers CBR from 32 to
+320 kbit/s, VBR (`-V` 0, 3, 6, 9), ABR, mono, joint and forced L/R stereo, MPEG-2 and MPEG-2.5
+down to 8 kHz. `oracle_mpeg.rs` requires the ISO/IEC 11172-4 full accuracy criterion (RMS error
+below 2^-15 / sqrt(12), maximum at most 2^-14, per channel, exact alignment, a lag of one sample far
+worse). The fixtures are untagged (no Xing/LAME tag), so FFmpeg trims nothing and the Reader's
+output is the reference without the decoder delay (481 and 529 samples). The corpus is 3.0 MiB.
+
+## MPEG audio conformance
+
+The ISO/IEC 11172-4 and 13818-4 compliance bitstreams are ISO copyright material without a
+clear redistribution licence; they were not downloaded or committed. MPEG audio therefore stays
+below `conformance`: Layers II and III are `oracle` (codec `mpeg-audio`) and Layer I is
+`experimental` (codec `mpeg-audio-layer1`; FFmpeg has no Layer I encoder, so there is no real-world
+Layer I fixture or third-party oracle). Details in `docs/sources/mpeg-audio.md`.
+
 ## Malformed-input smoke tests
 
 Each demuxer and decoder is exercised with truncated, oversized and

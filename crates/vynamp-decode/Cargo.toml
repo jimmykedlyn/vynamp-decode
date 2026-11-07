@@ -8,11 +8,13 @@ repository.workspace = true
 description = "Dependency-free audio decoding: containers, codecs and a gapless-aware Reader"
 
 [features]
-default = ["riff", "aiff", "pcm", "flac"]
+default = ["riff", "aiff", "pcm", "flac", "mpa", "mp3"]
 riff = ["dep:vynamp-decode-riff"]
 aiff = ["dep:vynamp-decode-aiff"]
 pcm = ["dep:vynamp-decode-pcm"]
 flac = ["dep:vynamp-decode-flac"]
+mpa = ["dep:vynamp-decode-mpa"]
+mp3 = ["dep:vynamp-decode-mp3"]
 
 [dependencies]
 vynamp-decode-core = { path = "../vynamp-decode-core" }
@@ -20,6 +22,8 @@ vynamp-decode-riff = { path = "../vynamp-decode-riff", optional = true }
 vynamp-decode-aiff = { path = "../vynamp-decode-aiff", optional = true }
 vynamp-decode-pcm = { path = "../vynamp-decode-pcm", optional = true }
 vynamp-decode-flac = { path = "../vynamp-decode-flac", optional = true }
+vynamp-decode-mpa = { path = "../vynamp-decode-mpa", optional = true }
+vynamp-decode-mp3 = { path = "../vynamp-decode-mp3", optional = true }
 
 [dev-dependencies]
 vynamp-decode-testkit = { path = "../vynamp-decode-testkit" }

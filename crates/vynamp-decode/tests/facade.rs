@@ -819,12 +819,19 @@ fn codec_lookup() {
         reg.codec_for(&CodecId::Flac).is_some(),
         cfg!(feature = "flac")
     );
-    assert!(reg.codec_for(&CodecId::Mp3).is_none());
+    for id in [CodecId::Mp1, CodecId::Mp2, CodecId::Mp3] {
+        assert_eq!(
+            reg.codec_for(&id).is_some(),
+            cfg!(feature = "mp3"),
+            "{id:?}"
+        );
+    }
     assert_eq!(
         reg.containers().count(),
         usize::from(cfg!(feature = "riff"))
             + usize::from(cfg!(feature = "aiff"))
             + usize::from(cfg!(feature = "flac"))
+            + usize::from(cfg!(feature = "mpa"))
     );
 }
 
@@ -836,13 +843,12 @@ fn reader_is_send() {
 
 #[test]
 fn builtin_formats_have_the_expected_verification_level() {
-    // FLAC has official conformance vectors (IETF flac-test-files); PCM has none.
-    let want = |name: &str| {
-        if name == "flac" {
-            Verification::Conformance
-        } else {
-            Verification::Oracle
-        }
+    // FLAC has official conformance vectors (IETF flac-test-files); PCM has none; Layer I has
+    // no real-world fixture and no third-party oracle (FFmpeg has no Layer I encoder).
+    let want = |name: &str| match name {
+        "flac" => Verification::Conformance,
+        "mpeg-audio-layer1" => Verification::Experimental,
+        _ => Verification::Oracle,
     };
     let reg = default_registry();
     assert!(reg.containers().all(|c| c.verification == want(c.name)));

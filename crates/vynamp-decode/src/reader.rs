@@ -180,6 +180,9 @@ impl Reader {
         let target = frame.saturating_add(u64::from(self.track.delay));
         let to = self.demuxer.seek(self.track.id, target)?;
         self.decoder.reset();
+        // The packets before the target are decoded only to warm the decoder up.
+        self.decoder
+            .set_preroll(to.frame.saturating_add(to.preroll));
         self.pos = to.frame;
         // The position follows where the demuxer actually landed (a seek past the end
         // lands at the end), mapped to the output timeline.

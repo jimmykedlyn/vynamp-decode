@@ -9,6 +9,8 @@ dependencies = [
  "vynamp-decode-aiff",
  "vynamp-decode-core",
  "vynamp-decode-flac",
+ "vynamp-decode-mp3",
+ "vynamp-decode-mpa",
  "vynamp-decode-pcm",
  "vynamp-decode-riff",
  "vynamp-decode-testkit",
@@ -29,6 +31,23 @@ version = "0.0.0"
 
 [[package]]
 name = "vynamp-decode-flac"
+version = "0.0.0"
+dependencies = [
+ "vynamp-decode-core",
+ "vynamp-decode-testkit",
+]
+
+[[package]]
+name = "vynamp-decode-mp3"
+version = "0.0.0"
+dependencies = [
+ "vynamp-decode-core",
+ "vynamp-decode-mpa",
+ "vynamp-decode-testkit",
+]
+
+[[package]]
+name = "vynamp-decode-mpa"
 version = "0.0.0"
 dependencies = [
  "vynamp-decode-core",
