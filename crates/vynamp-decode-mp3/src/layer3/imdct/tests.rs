@@ -143,7 +143,14 @@ impl Reference {
                 direct36(&x, bt)
             };
             for i in 0..18 {
-                let mut v = out[i] + self.tail[sb][i];
+                // A short block's third window half is the second half of the first window,
+                // so only the first two halves add the previous granule's tail.
+                let carried = if short && i >= 12 {
+                    0.0
+                } else {
+                    self.tail[sb][i]
+                };
+                let mut v = out[i] + carried;
                 self.tail[sb][i] = out[18 + i];
                 if sb % 2 == 1 && i % 2 == 1 {
                     v = -v;

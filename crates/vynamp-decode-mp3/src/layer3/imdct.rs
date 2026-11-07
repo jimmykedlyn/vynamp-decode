@@ -224,13 +224,24 @@ impl Overlap {
             }
             if sb < long_sb {
                 imdct36(lines, block_type, &mut out);
+                for i in 0..18 {
+                    let y = out[i] + tail[i];
+                    tail[i] = out[18 + i];
+                    slots[i][sb] = if sb & i & 1 == 1 { -y } else { y };
+                }
             } else {
                 imdct12(lines, &mut out);
-            }
-            for i in 0..18 {
-                let y = out[i] + tail[i];
-                tail[i] = out[18 + i];
-                slots[i][sb] = if sb & i & 1 == 1 { -y } else { y };
+                // A short block consumes the previous granule's tail only in its first two
+                // window halves. The third half (slots 12 to 17) is the second half of the
+                // first window, which already replaced those three tail samples: the three
+                // 12-sample windows overlap, so the last six slots are `out[12..18]` alone
+                // (ISO/IEC 11172-3 2.4.3.4.10; FFmpeg n8.1.3 `compute_imdct` assigns
+                // `buf[12..18]` from window 0 before reading it back).
+                for i in 0..18 {
+                    let y = if i < 12 { out[i] + tail[i] } else { out[i] };
+                    tail[i] = out[18 + i];
+                    slots[i][sb] = if sb & i & 1 == 1 { -y } else { y };
+                }
             }
         }
     }

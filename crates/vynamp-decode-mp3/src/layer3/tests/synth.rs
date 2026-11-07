@@ -104,11 +104,10 @@ fn reference_pcm(frame: &[u8]) -> Vec<Vec<f64>> {
                     f0 += w;
                 }
             }
-            // Long subbands: all, none (short), two (mixed) or four (mixed at 8 kHz, whose
-            // 72 long lines are four subbands).
+            // Long subbands: all, none (short) or two (mixed, also at 8 kHz where the long bands
+            // cover 72 lines).
             let long_sb = match (g.info.block_type, g.info.mixed_block) {
                 (2, false) => 0,
-                (2, true) if g.layout.bound(g.layout.n_long) == 72 => 4,
                 (2, true) => 2,
                 _ => 32,
             };
@@ -375,12 +374,14 @@ fn mpeg2_intensity_stereo_uses_odd_even_positions_and_the_scale_bit() {
 }
 
 #[test]
-fn a_right_channel_without_positions_is_not_intensity() {
-    // compress 0 on the right channel of an MPEG-2 intensity frame: no position is sent, all
-    // are illegal, and the right channel stays silent.
+fn a_right_channel_without_positions_is_intensity_at_position_zero() {
+    // compress 0 on the right channel of an MPEG-2 intensity frame: every scalefactor width is
+    // 0, so no position is sent and every band is position 0 (both gains 1). The two channels
+    // therefore carry the left channel unchanged. Only a transmitted all-ones value is the
+    // illegal marker.
     let (plain, intensity) = intensity_frames(&v2_stereo(), &v2_intensity(), &empty, 1);
     let (base, got) = (decode_pcm(&plain), decode_pcm(&intensity));
-    scaled_matches(&base, &got, 1.0, 0.0, "no positions");
+    scaled_matches(&base, &got, 1.0, 1.0, "no positions");
 }
 
 #[test]

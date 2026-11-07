@@ -324,15 +324,29 @@ fn mixed_blocks_treat_the_long_part_as_one_more_band_group() {
 }
 
 #[test]
-fn channels_with_different_block_layouts_skip_intensity() {
+fn channels_with_different_block_layouts_bound_intensity_by_the_right_channel() {
+    // The left channel is a long block, the right one a short block. Intensity positions are
+    // the right channel's scalefactors, so its 13 short bands (three entries each) bound every
+    // region, and both channels' lines are sliced on those boundaries.
     let mut rng = Rng(27);
     let l0 = random_lines(&mut rng, 576);
     let r0 = random_lines(&mut rng, 50);
     let (mut l, mut r) = (l0, r0);
     let g0 = granule(V1, 44100, long(), &[], 0);
-    let g1 = granule(V1, 44100, short(), &[2; 36], 0);
+    // flsf: only the highest short band gets a position (2, i0 = 0.8409 on the left).
+    let g1 = granule(
+        V1,
+        44100,
+        short(),
+        &[2; 12].iter().copied().chain([0; 24]).collect::<Vec<_>>(),
+        0,
+    );
     process(&mut l, &mut r, [&g0, &g1], stereo(V1, false, true));
-    assert_eq!((l, r), (l0, r0));
+    assert_ne!(
+        l, l0,
+        "the long channel is scaled by the short channel's bands"
+    );
+    assert!(l.iter().all(|v| v.is_finite()) && r.iter().all(|v| v.is_finite()));
 }
 
 #[test]

@@ -99,8 +99,12 @@ pub(super) fn process(l: &mut [f32; 576], r: &mut [f32; 576], g: [&Granule; 2], 
         return;
     }
     let used = g[0].used_lines.max(g[1].used_lines).min(576);
-    let (l0, l1) = (&g[0].layout, &g[1].layout);
-    if !s.intensity || l0.n_long != l1.n_long || l0.n_short != l1.n_short {
+    // Intensity positions are scalefactors of the right channel, so its bands bound every
+    // region even when the two channels use different block layouts (`l1`); the left
+    // channel's lines are sliced on the same boundaries, which is what the reference
+    // decoder does.
+    let l1 = &g[1].layout;
+    if !s.intensity {
         if s.ms {
             middle_side(&mut l[..used], &mut r[..used]);
         }

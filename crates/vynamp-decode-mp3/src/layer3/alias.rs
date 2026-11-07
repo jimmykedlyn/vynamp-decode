@@ -4,7 +4,7 @@
 //! every subband boundary (lines `18 sb - 1 - i` and `18 sb + i`, `i` in 0 to 7):
 //! `a' = a cs_i - b ca_i`, `b' = b cs_i + a ca_i` with `cs = 1 / sqrt(1 + c^2)`,
 //! `ca = c / sqrt(1 + c^2)` and the eight coefficients `c` of the standard. Short blocks have
-//! none; a mixed block only across the boundaries between its long subbands (the first one; the first three at 8 kHz, where the long bands cover four subbands).
+//! none; a mixed block only across the boundary between its two long subbands (at every rate).
 
 use std::sync::OnceLock;
 

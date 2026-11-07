@@ -1,3 +1,4 @@
+mod blackbox;
 mod synth;
 
 use super::huffman::book;
@@ -867,8 +868,9 @@ fn the_end_to_end_fixtures_cover_every_block_type_and_middle_side() {
 
 #[test]
 fn long_regions_agree_for_every_sample_rate() {
-    // The lines requantized as long bands, the subbands with the long IMDCT and the alias
-    // boundaries cover the same region: two subbands at every rate, four at 8 kHz.
+    // The lines requantized as long bands and region 0 cover two subbands at every rate and
+    // four at 8 kHz; the long IMDCT and the alias boundary cover two subbands at every rate
+    // (the 8 kHz split was cross-checked black-box, `bb-m25-8k-mixed`).
     use scalefactors::Layout;
     use vynamp_decode_mpa::MpegVersion::{V1, V2, V25};
     for (v, rate) in [
@@ -892,7 +894,7 @@ fn long_regions_agree_for_every_sample_rate() {
         let l = Layout::new(row, v, &mixed);
         let want = if rate == 8000 { 4 } else { 2 };
         assert_eq!(l.bound(l.n_long), 18 * want, "{v:?} {rate}: long lines");
-        assert_eq!(l.long_subbands(), want, "{v:?} {rate}: long subbands");
+        assert_eq!(l.long_subbands(), 2, "{v:?} {rate}: long subbands");
         assert_eq!(l.mixed_region0, 18 * want, "{v:?} {rate}: region 0");
         let long = Layout::new(row, v, &GranuleInfo::default());
         assert_eq!(long.long_subbands(), 32);

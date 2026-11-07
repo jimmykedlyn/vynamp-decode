@@ -75,13 +75,17 @@ impl Layout {
     }
 
     /// Subbands (of 18 lines) processed as long blocks by the alias reduction and the IMDCT:
-    /// all 32 for long blocks, none for short blocks, and for a mixed block the subbands that
-    /// the long bands cover (two; four at 8 kHz).
+    /// all 32 for long blocks, none for short blocks, and the two lowest for a mixed block
+    /// (ISO/IEC 11172-3 2.4.2.7, `mixed_block_flag`), at every rate. At 8 kHz the long bands
+    /// of a mixed block cover 72 lines (four subbands), but the transform still treats only
+    /// two as long: MPEG-2.5 is not an ISO standard, and this is what the FFmpeg n8.1.3
+    /// command line decodes (test `hand_built_streams_match_the_black_box_reference`,
+    /// `bb-m25-8k-mixed`).
     pub(crate) fn long_subbands(&self) -> usize {
-        if self.n_short == 0 {
-            32
-        } else {
-            self.bound(self.n_long) / 18
+        match (self.n_long, self.n_short) {
+            (_, 0) => 32,
+            (0, _) => 0,
+            _ => 2,
         }
     }
 
@@ -111,8 +115,9 @@ pub(crate) struct Scalefactors {
     /// Raw values by layout entry (0 where none is transmitted).
     pub values: [u8; 40],
     /// Bit `i` set: entry `i` of an intensity right channel (MPEG-2/2.5) holds the all-ones
-    /// value of its width, which marks an illegal intensity position. A partition of width 0
-    /// (nothing is sent; `2^0 - 1 = 0` is its only value) is illegal throughout.
+    /// value of its width, which marks an illegal intensity position. Only transmitted values
+    /// can carry the marker: a partition of width 0 sends nothing, so its entries are
+    /// position 0, which is legal.
     pub illegal: u64,
     /// The `preflag` in effect.
     pub preflag: bool,
@@ -196,13 +201,9 @@ pub(crate) fn read(bits: &mut Bits, p: &Params, prev: &[u8; 40]) -> Scalefactors
                     out.illegal |= 1 << (at + k);
                 }
             }
-        } else if p.intensity_right {
-            // A partition of width 0 sends nothing: every position is 0 = 2^0 - 1 = `is_max`,
-            // which the standard (and its reference decoder) treats as illegal.
-            for k in at..end {
-                out.illegal |= 1 << k;
-            }
         }
+        // A partition of width 0 sends nothing, so no value can be the all-ones marker: every
+        // entry is position 0 (both gains 1) and none is marked illegal.
         at += usize::from(count);
     }
     out

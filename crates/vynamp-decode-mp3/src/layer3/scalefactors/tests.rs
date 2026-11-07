@@ -293,17 +293,15 @@ fn lsf_intensity_right_channel_variant() {
     assert_eq!(&s.values[7..21], &[3; 14]);
     assert_eq!(s.illegal, (1u64 << 21) - 1);
     assert!(!s.preflag);
-    // Zero bits: every value is 0 = 2^0 - 1, so a partition of width 0 is entirely illegal.
+    // Zero bits: a partition of width 0 sends nothing, so no value can carry the all-ones
+    // marker; every entry is position 0 and none is illegal.
     let zeros = W {
         bytes: vec![0; 32],
         bits: 256,
     };
     let (s, _) = read_with(V2, 22050, &gi(0, false, 381), 0, true, &[0; 40], &zeros);
-    assert_eq!(
-        s.illegal,
-        (0b111 << 18) | 0b11_1111,
-        "width 0 partitions only"
-    );
+    assert_eq!(s.illegal, 0, "width 0 partitions are not transmitted");
+    assert_eq!(&s.values[..6], &[0; 6]);
     // The same value on the left channel is an ordinary scalefactor.
     let (s, _) = read_with(V2, 22050, &gi(0, false, 100), 0, false, &[0; 40], &w);
     assert_eq!(s.illegal, 0);
@@ -312,17 +310,18 @@ fn lsf_intensity_right_channel_variant() {
     assert_eq!(pos, 6 * 2 + 6 * 2);
     assert_eq!(&s.values[..6], &[0; 6]);
     assert_eq!(&s.values[6..18], &[3; 12]);
-    // Partitions 0 (6 values) and 3 (3 values) have width 0: no position can be sent, which
-    // the standard's `is_max = 2^0 - 1 = 0` makes illegal too.
-    assert_eq!(s.illegal, (1u64 << 21) - 1);
+    // Partitions 0 (6 values) and 3 (3 values) have width 0: nothing is sent, so they are
+    // position 0, not the all-ones marker. Everything else is transmitted as 255 (all ones
+    // for width 2 or 3).
+    assert_eq!(s.illegal, !0b111_111 & !(0b111 << 18) & ((1u64 << 21) - 1));
     // compress 500 -> sfc 250 - 244 = 6: slen (2, 0, 0, 0), bands 8 8 5 0; no preflag even
     // though the field is >= 500.
     let (s, pos) = read_with(V2, 22050, &gi(0, false, 500), 0, true, &[0; 40], &w);
     assert_eq!(pos, 16);
     assert!(!s.preflag);
     assert_eq!(&s.values[..8], &[3; 8]);
-    // Partitions 1 and 2 (13 values) have width 0.
-    assert_eq!(s.illegal, (1u64 << 21) - 1);
+    // Partitions 1 and 2 (13 values) have width 0; only the 8 transmitted values are marked.
+    assert_eq!(s.illegal, 0xFF);
 }
 
 #[test]
