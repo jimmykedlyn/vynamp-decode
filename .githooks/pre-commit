@@ -1,0 +1,28 @@
+#!/bin/sh
+# Regra de Gitflow local: commit so em branch de trabalho.
+#
+# Portao em shell, sem dependencia do umbrella: 'cargo xtask guard-branch' nao
+# existe num repo de modulo, e um hook que falha em rodar nao protege nada.
+# A regex e a mesma de xtask/src/repo.rs:225.
+set -eu
+
+# 'git rev-parse --abbrev-ref HEAD' falha com exit 128 em branch sem commit, e com
+# 'set -eu' o hook morreria antes da mensagem. 'branch --show-current' responde no
+# branch nao-nascido e devolve vazio em detached HEAD.
+branch="$(git branch --show-current)"
+
+if [ -z "$branch" ]; then
+    echo "Commit bloqueado: HEAD destacado. Crie uma branch de trabalho." >&2
+    exit 1
+fi
+
+if [ "$branch" = "main" ] || [ "$branch" = "develop" ]; then
+    echo "Commit bloqueado em $branch. Trabalhe em feature/*, fix/*, chore/* ou hotfix/*." >&2
+    exit 1
+fi
+
+if ! echo "$branch" | grep -Eq '^(feature|fix|chore|hotfix)/task-e[0-9]{2}-[0-9]{2}-claude-[a-z0-9]+(-[a-z0-9]+)*$|^chore/claude-[a-z0-9]+(-[a-z0-9]+)*$|^release/[0-9]+\.[0-9]+\.[0-9]+([.-][a-z0-9.-]+)?$'; then
+    echo "Commit bloqueado: branch fora do Gitflow: $branch" >&2
+    echo "Use feature/task-<id>-<slug>, fix/..., chore/..., hotfix/... ou release/X.Y.Z." >&2
+    exit 1
+fi
