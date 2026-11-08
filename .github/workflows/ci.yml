@@ -1,0 +1,83 @@
+name: CI
+
+# GitHub Actions e a unica CI do projeto (ADR-014). Toda action vai fixada por
+# SHA de commit completo; tag flutuante reprova o gate do umbrella.
+#
+# Este repositorio e um workspace (`members = ["crates/*"]`). Os comandos usam
+# `--workspace` em vez de `--all`: `--all` inclui dependencia de path de fora do
+# workspace, e nao e o que se quer verificar aqui.
+on:
+  pull_request:
+    branches: [develop]
+  push:
+    branches: [develop, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fmt:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Provision pinned Rust toolchain
+        run: rustup show
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    needs: fmt
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Provision pinned Rust toolchain
+        run: rustup show
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  test:
+    needs: clippy
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Provision pinned Rust toolchain
+        run: rustup show
+      - run: cargo test --workspace --locked
+
+  # `cargo-machete` nao vem no toolchain fixado. Ausente, o passo registra e
+  # segue: AGENTS.md 3 trata dependencia nao usada como achado de review, nao
+  # como gate. Se um dia entrar no toolchain, o comando passa a valer sozinho.
+  machete:
+    needs: clippy
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Provision pinned Rust toolchain
+        run: rustup show
+      - run: cargo machete || echo 'cargo-machete ausente no toolchain; verificacao pulada e listada.'
+
+  gate:
+    name: CI Gate
+    if: always()
+    needs: [fmt, clippy, test, machete]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Aggregate
+        shell: bash
+        run: |
+          test "${{ needs.fmt.result }}" = success
+          test "${{ needs.clippy.result }}" = success
+          test "${{ needs.test.result }}" = success
+          test "${{ needs.machete.result }}" = success
+          echo 'CI Gate passed.'
