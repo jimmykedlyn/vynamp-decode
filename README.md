@@ -41,3 +41,36 @@ Licensed under either of MIT ([LICENSE-MIT](LICENSE-MIT)) or Apache-2.0
 ([LICENSE-APACHE](LICENSE-APACHE)) at your option; [LICENSE](LICENSE) is the
 one-line pointer to both. See [LEGAL.md](LEGAL.md) for patent and licensing
 notes on optional features.
+
+# Português — vynamp-decode
+
+[English](#vynamp-decode) · **Português**
+
+Biblioteca de decodificação de áudio em Rust, sem dependências (só `std`):
+containers, codecs, metadados e CUE, sem nenhuma dependência do crates.io e sem
+`unsafe` nos crates da biblioteca.
+
+**Estado:** pré-alpha, repositório público. As APIs são instáveis e nada foi
+publicado.
+
+## Suporte a formatos
+
+A tabela acima e as notas de verificação são a saída de
+`cargo run --example support_matrix`, em inglês como o código; valem igualmente
+para as duas línguas e não são traduzidas para não divergirem da geração. Em
+resumo: `conformance` só vale com vetores oficiais de conformidade e
+comparação bit-exata; `oracle` compara com a saída de uma implementação de
+referência; `experimental` é o que ainda não tem oráculo.
+
+## Documentação
+
+A fonte do mdBook está em [`book/`](book/) (arquitetura, uso, como adicionar um
+codec, verificação). Construir com `mdbook` é opcional.
+
+## Licença
+
+Distribuída sob os termos da licença MIT ([LICENSE-MIT](LICENSE-MIT)) ou da
+Apache-2.0 ([LICENSE-APACHE](LICENSE-APACHE)), à escolha de quem usa;
+[LICENSE](LICENSE) é o ponteiro de uma linha para as duas. Ver
+[LEGAL.md](LEGAL.md) para notas de patente e licenciamento das features
+opcionais.
