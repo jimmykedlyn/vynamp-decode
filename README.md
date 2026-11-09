@@ -3,7 +3,7 @@
 Dependency-free audio decoding library in Rust (std only): containers, codecs,
 metadata and CUE, with no crates.io dependencies and no `unsafe` in the library crates.
 
-**Status:** pre-alpha, private repository. APIs are unstable and nothing is published.
+**Status:** pre-alpha, public repository. APIs are unstable and nothing is published.
 
 ## Format support
 
