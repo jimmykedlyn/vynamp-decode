@@ -38,6 +38,15 @@ streams are ISO copyright without a clear redistribution licence and are not use
 An mdBook source lives in [`book/`](book/) (architecture, usage, adding a codec,
 verification). Building it with `mdbook` is optional.
 
+## CI
+
+GitHub Actions is the only CI (ADR-014). [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
+runs `fmt`, `clippy`, `test` and `machete` on every pull request to `develop`, and the
+job `gate` publishes the required status **`CI Gate`**. It runs with `if: always()` and
+reads `needs.*.result`, so a dependency that fails, is cancelled or never reports fails
+the gate — there is no path to a green gate without the real checks. Actions are pinned
+by full commit SHA; a floating tag is an unreviewed dependency.
+
 ## Licence
 
 Licensed under either of MIT ([LICENSE-MIT](LICENSE-MIT)) or Apache-2.0
@@ -73,6 +82,16 @@ referência; `experimental` é o que ainda não tem oráculo.
 
 A fonte do mdBook está em [`book/`](book/) (arquitetura, uso, como adicionar um
 codec, verificação). Construir com `mdbook` é opcional.
+
+## CI
+
+O GitHub Actions é a única CI (ADR-014). O
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) roda `fmt`, `clippy`, `test`
+e `machete` em todo pull request para `develop`, e o job `gate` publica o status
+exigido **`CI Gate`**. Ele roda com `if: always()` e lê `needs.*.result`, então
+uma dependência que falha, é cancelada ou nunca reporta reprova o gate — não há
+caminho para gate verde sem as checagens reais. As actions vão fixadas por SHA
+de commit completo; tag flutuante é dependência não revisada.
 
 ## Licença
 
