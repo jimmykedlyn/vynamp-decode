@@ -38,5 +38,6 @@ verification). Building it with `mdbook` is optional.
 ## Licence
 
 Licensed under either of MIT ([LICENSE-MIT](LICENSE-MIT)) or Apache-2.0
-([LICENSE-APACHE](LICENSE-APACHE)) at your option. See [LEGAL.md](LEGAL.md) for
-patent and licensing notes on optional features.
+([LICENSE-APACHE](LICENSE-APACHE)) at your option; [LICENSE](LICENSE) is the
+one-line pointer to both. See [LEGAL.md](LEGAL.md) for patent and licensing
+notes on optional features.
