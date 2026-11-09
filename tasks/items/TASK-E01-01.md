@@ -40,8 +40,8 @@ Spike de decoder registry, corpus básico e ADR-002 com versões/features propos
 
 | ID | Given | When | Then |
 |---|---|---|---|
-| `TASK-E01-01-AC-1` | PENDENTE | PENDENTE | FLAC/MP3/WAV decodificam contra referência |
-| `TASK-E01-01-AC-2` | PENDENTE | PENDENTE | delay/padding e PCM24/32 preservados quando perfil permite. |
+| `TASK-E01-01-AC-1` | três fixtures geradas pelo próprio spike — WAV PCM16, FLAC e MP3 do mesmo tom — com hash registrado no manifesto | cada arquivo é decodificado pelo backend candidato escolhido no ADR-002 e o PCM resultante é comparado sample a sample com o WAV de origem | FLAC/MP3/WAV decodificam contra referência |
+| `TASK-E01-01-AC-2` | um FLAC com encoder delay e padding declarados no streaminfo, um WAV PCM24 e um WAV PCM32 | cada um é decodificado e a contagem de frames e os bits válidos são comparados antes e depois da remoção de delay e padding | delay/padding e PCM24/32 preservados quando perfil permite. |
 
 ## Verificação
 

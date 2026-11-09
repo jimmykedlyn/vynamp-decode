@@ -40,10 +40,10 @@ Catálogo versionado, spikes de backends/licenças e modelo de capability por al
 
 | ID | Given | When | Then |
 |---|---|---|---|
-| `TASK-E17-01-AC-1` | PENDENTE | PENDENTE | Cada perfil tem fase/política/operação |
-| `TASK-E17-01-AC-2` | PENDENTE | PENDENTE | codecs NGA têm decisão de viabilidade |
-| `TASK-E17-01-AC-3` | PENDENTE | PENDENTE | não inferir HE/USAC por AAC-LC nem renderer por decoder. Prova true-peak e pin do oráculo M0 rastreados |
-| `TASK-E17-01-AC-4` | PENDENTE | PENDENTE | implementação permanece M3. |
+| `TASK-E17-01-AC-1` | o catálogo de perfis de codec da spec de capability registry | cada perfil é confrontado com o backend candidato e com o alvo | Cada perfil tem fase/política/operação |
+| `TASK-E17-01-AC-2` | os codecs NGA listados no catálogo | a viabilidade de cada um é avaliada | codecs NGA têm decisão de viabilidade |
+| `TASK-E17-01-AC-3` | os spikes de backend e o estimador true-peak independente | a inferência de capability é conferida contra o catálogo e o pin do oráculo | não inferir HE/USAC por AAC-LC nem renderer por decoder. Prova true-peak e pin do oráculo M0 rastreados |
+| `TASK-E17-01-AC-4` | o escopo M0 desta TASK e a implementação do catálogo | o backlog é conferido depois da entrega | implementação permanece M3. |
 
 ## Verificação
 

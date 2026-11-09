@@ -40,9 +40,9 @@ Adapters local source/probe/decode para WAV/AIFF/FLAC/MP3.
 
 | ID | Given | When | Then |
 |---|---|---|---|
-| `TASK-E01-04-AC-1` | PENDENTE | PENDENTE | Extensão incorreta permite sniff |
-| `TASK-E01-04-AC-2` | PENDENTE | PENDENTE | corrupt/oversized falham com erro tipado |
-| `TASK-E01-04-AC-3` | PENDENTE | PENDENTE | decoder lista perfis reais. |
+| `TASK-E01-04-AC-1` | um FLAC renomeado para .mp3 e um MP3 renomeado para .wav | o probe lê o cabeçalho sem consultar a extensão e o registry escolhe o decoder pelo conteúdo | Extensão incorreta permite sniff |
+| `TASK-E01-04-AC-2` | um arquivo truncado no meio do streaminfo e um cabeçalho que declara 2^31 frames, com o limite de tamanho configurado | o probe e o decode rodam sobre os dois arquivos | corrupt/oversized falham com erro tipado |
+| `TASK-E01-04-AC-3` | a build com as features de decoder fixadas no ADR-002 ativas | a API do registry enumera formatos, perfis e taxas suportados | decoder lista perfis reais. |
 
 ## Verificação
 
