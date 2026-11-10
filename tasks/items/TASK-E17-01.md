@@ -64,4 +64,30 @@ Catálogo versionado, spikes de backends/licenças e modelo de capability por al
 - [ ] PR aberto com template preenchido; CI Gate verde no SHA final
 ## Notas de execução
 
-Preenchido durante a execução, não antes.
+Medido em 2026-11-09. Provas em `evidence/PR/task-e17-01/`.
+
+| AC | Verificação executada | Resultado |
+|---|---|---|
+| AC-1 | `config/format-catalog.json` lido campo a campo nas 68 entradas; `xtask/src/catalog.rs:5-69` lido para as guardas; `cargo xtask ci docs` verde | **Satisfeito, com uma lacuna.** As 68 entradas têm `phase`, `policy`, `operations` e `target_platforms` preenchidos (`faltando phase/policy/operations: nenhum`; `target_platforms` vazio: 0). Fase distribuída M1 4 / M2 10 / M3 30 / M5 24; política required 32 / optional 16 / conditional 19 / unsupported 1. **Lacuna medida:** `backend_candidates` assume só **3 valores** em 68 entradas — 65 repetem o marcador "Adapter auditado; escolher e fixar configuração em M0", **2** nomeiam backend real (`flac-native` e `mp3`, ambos "vynamp-decode (ADR-011)") e 1 é helper isolado (`sacd-iso`). `sources` está vazio em **56 de 68**. O AC pede "confrontado com o backend candidato"; para 65 das 68 entradas a coluna é marcador, não candidato |
+| AC-2 | as entradas NGA no catálogo: `aac-lc-adts`, `aac-he`, `aac-adif`, `ac3`, `eac3`, `truehd-mlp`, `dts`, `mpeg-h`, `ac4`, `iamf` | **Satisfeito no que o AC pede, e o resultado é uniforme:** as 10 têm fase e política atribuídas e **todas** estão `state: planned` — nenhuma está `available`, `verified` ou `experimental`. A decisão de viabilidade registrada no catálogo é, portanto, "ainda não". A distinção que o `Then` exige está guardada em código, não em prosa: `aac-lc-adts` e `aac-he` são entradas **separadas** com `codec_id: aac` e fases diferentes, e `xtask/src/catalog.rs` recusa `iamf` com `kind` diferente de `immersive-model` ("IAMF must be an immersive model") |
+| AC-3 | procura por estimador true-peak independente e por pin de oráculo em `config/`, `schemas/`, `libs/`, `tests/` | **Não satisfeito.** `grep -rniE "true.?peak|bs\.1770|oversampl"` em `config/`+`schemas/`+`libs/`+`tests/` **não retorna nada**. Não há estimador, não há pin de oráculo. O que existe é texto de spec: `design/06-painel-dsp.md:74` ("oversampling ≥ 4× conforme ITU-R BS.1770… algoritmo pinado na fixture") descreve o que deveria existir, e `delivery/01-roadmap.md:41` põe "Proteção final true-peak" em **M3 · E17-07/08**. O pin que o `Then` exige não existe em lugar nenhum. A parte "não inferir HE/USAC por AAC-LC nem renderer por decoder" **está** satisfeita nas entradas separadas e na guarda de IAMF |
+| AC-4 | `tasks/backlog.json`: `TASK-E17-01` com `status: planned`, `phase: M0`; catálogo com as 68 entradas `planned` | **Satisfeito.** Nenhuma implementação de catálogo foi feita nesta TASK: o que existe é o JSON de planejamento mais a validação do `xtask`, ambos já presentes antes. Implementar runtime de capability continua M3 |
+
+**O que esta TASK mediu, e o que ela não mediu.**
+
+Mediu: a forma do catálogo contra o schema (o gate `ci docs` valida contra
+`schemas/format-catalog.schema.json` e roda `catalog::validate`), a completude de
+fase/política/operação/alvo nas 68 entradas, a separação AAC-LC × HE × USAC, e as
+guardas de IAMF/Bluetooth/FLAC-em-WebM que o `catalog.rs` impõe.
+
+**Não mediu:** um único spike de backend. O `deliverable` pede "spikes de
+backends/licenças"; `backend_candidates` não nomeia backend nenhum e não há código de
+backend no repositório para medir. E não mediu true-peak: AC-3 exige "prova
+true-peak e pin do oráculo M0 rastreados", e **os dois estão ausentes**, não só não
+documentados.
+
+**Custo se essa leitura estiver errada:** se "spikes de backend" for satisfeito pela
+lista de candidatos nomeados na spec (Symphonia/CPAL em ADR-002), o AC-1 fecha. Se a
+exigência for mais que isso — uma medição por backend e por alvo —, o AC-1 está
+aberto e o AC-3 está aberto em definitivo. A TASK fecha três dos quatro critérios e
+registra o quarto como ausência medida.
