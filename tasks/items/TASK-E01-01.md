@@ -90,12 +90,20 @@ Medido em 2026-11-09. Provas em `evidence/PR/task-e01-01/`.
 O `deliverable` é "Spike de decoder registry, corpus básico e **ADR-002** com
 versões/features propostas". Medido:
 
-- **Não há spike de registry.** `find . -name "*.rs" | grep -i registry` não retorna
-  nada. O registry que existe é `config/format-catalog.json` + `xtask/src/catalog.rs`
-  (68 entradas, validação de `required`/alvos/`association_allowed`), que é
-  **planejamento**, não runtime: `config/format-catalog.json` marca as 68 entradas
-  `state: planned`, e `reference/audio/06-codec-capability-registry.md:5` diz
-  "Sem decoder implementado neste pacote, nenhum perfil é anunciado disponível".
+- **O spike de registry existe, mas não é o que o `deliverable` pede.** A frase
+  anterior desta nota dizia que `find . -name "*.rs" | grep -i registry` não retorna
+  nada. **Está errada**: `crates/vynamp-decode-core/src/registry.rs` existe desde
+  `7f47c0a` (2026-10-23), duas semanas antes desta medição, e é código de runtime —
+  `Registry`, `ContainerDescriptor`, `CodecDescriptor`, `Verification`, `probe()`
+  com skip de ID3v2 e desempate por extensão, `codec_for()`. `crates/vynamp-decode/src/lib.rs:106`
+  registra quatro containers (RIFF, AIFF, FLAC, MPA) e quatro codecs. A conclusão que
+  sobrou é mais estreita e continua de pé: **esse registry é o do produto, não um
+  spike**, e o que o `deliverable` pede em separado é o ADR-002 com versões/features.
+  O outro catálogo, `config/format-catalog.json` + `xtask/src/catalog.rs` (68
+  entradas, validação de `required`/alvos/`association_allowed`), é **planejamento**,
+  não runtime: marca as 68 entradas `state: planned`, e
+  `reference/audio/06-codec-capability-registry.md:5` diz "Sem decoder implementado
+  neste pacote, nenhum perfil é anunciado disponível".
   O backend candidato do ADR-002 (Symphonia/CPAL) **não existe no `Cargo.toml`** do
   decode: os codecs são Rust próprio, sem candidato nomeado.
 - **ADR-002 está proposto, não congelado.** `adr/ADR-002-audio-core.md:3`:
@@ -106,11 +114,11 @@ versões/features propostas". Medido:
   substituída — o passo 43 (congelar ADRs) precisa decidir isso antes.
 
 **Custo se essa leitura estiver errada:** se o mantenedor considerar que a suíte de
-oráculos já é o "spike de registry", a TASK fecha com AC-1 e AC-2 satisfeitos, com a
-ressalva de WAV. Se a leitura correta for que o registry spike e o ADR-002 congelado
-são entregáveis separáveis, a TASK fica em dois blocos: a prova de decodificação está
-feita, o spike e o ADR não — e o ADR não pode ser congelado enquanto ADR-011 o
-substituir parcialmente.
+oráculos mais o `registry.rs` de runtime já são o "spike de registry", a TASK fecha
+com AC-1 e AC-2 satisfeitos, com a ressalva de WAV, e o que sobra é só o ADR-002. Se
+a leitura correta for que o registry spike e o ADR-002 congelado são entregáveis
+separáveis, a TASK fica em dois blocos: a prova de decodificação está feita, o ADR
+não — e o ADR não pode ser congelado enquanto ADR-011 o substituir parcialmente.
 
 **Limitação honesta:** nenhuma dessas medições foi feita em hardware de áudio. Nada
 aqui ouve um arquivo; tudo é comparação numérica contra referência versionada.
