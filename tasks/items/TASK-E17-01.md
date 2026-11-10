@@ -1,9 +1,8 @@
 # TASK-E17-01 — Fixar catálogo por binding, capacidades e corpus
 
 > Gerado pelo passo 37 a partir de `tasks/backlog.json`. Os campos de estado vêm do
-> backlog e não devem ser editados aqui. Critério de aceite: **PENDENTE** de autoria —
-> a coluna `Then` é o requisito aprovado, copiado literal; `Given` e `When` ainda
-> não existem.
+> backlog e não devem ser editados aqui. A coluna `Then` é o requisito aprovado,
+> copiado literal do backlog; `Given` e `When` foram autorados na execução.
 
 | Campo | Valor |
 |---|---|
@@ -27,7 +26,25 @@ Catálogo versionado, spikes de backends/licenças e modelo de capability por al
 
 ## Boundary
 
-<!-- PENDENTE: o que esta TASK não faz, mesmo parecendo relacionado. -->
+- **Não** implementa o guard true-peak nem o estimador independente. As notas medem que o
+  `grep` por `true.?peak|bs.1770|oversampl` em `config/`, `schemas/` e no decode não
+  encontra código; o que existe é texto de spec e a linha do roadmap. Fixar algoritmo,
+  oversampling e latência é `TASK-E17-07`, e medir o teto com oráculo é `TASK-E17-08`.
+- **Não** entrega um spike de backend por alvo. `backend_candidates` tem 3 valores
+  distintos em 68 entradas e 65 delas repetem o mesmo marcador; não há biblioteca de
+  terceiro no repo para medir. A escolha de backend foi decidida pelo ADR-011.
+- **Não** torna nenhum formato `available`. As 68 entradas do catálogo estão `state:
+  planned`, e as 10 NGA — `aac-lc-adts`, `aac-he`, `aac-adif`, `ac3`, `eac3`,
+  `truehd-mlp`, `dts`, `mpeg-h`, `ac4`, `iamf` — também. Viabilidade "sim" aqui seria
+  afirmar implementação que não existe.
+- **Não** implementa o runtime de capability. O que se valida é a forma do JSON contra
+  `schemas/format-catalog.schema.json` e as guardas de `xtask/src/catalog.rs`; inferir
+  capability em runtime continua `M3`.
+- **Não** integra xHE-AAC/USAC, AC-4, MPEG-H nem IAMF. `TASK-E17-04`, `TASK-E17-13`,
+  `TASK-E17-14` e `TASK-E17-15` são donas desses adapters; aqui só se registra a decisão
+  de fase e política.
+- **Não** escreve as fixtures do corpus de codec. O catálogo referencia `sources` vazio em
+  56 das 68 entradas; popular isso é trabalho das TASKs de corpus, não desta.
 
 ## Antes de começar
 
@@ -49,9 +66,9 @@ Catálogo versionado, spikes de backends/licenças e modelo de capability por al
 
 | Item | Comando / fixture | Evidência esperada |
 |---|---|---|
-| Teste automatizado | `cargo test` no repo `vynamp-decode` | verde no CI Gate |
-| Oráculo independente | PENDENTE | comparação numérica, não "parece certo" |
-| Hardware | PENDENTE | ausência é limitação registrada, não aprovação |
+| Teste automatizado | `cargo xtask ci docs` no umbrella, que valida `config/format-catalog.json` contra `schemas/format-catalog.schema.json` e roda `catalog::validate`; mais `cargo test --workspace --locked` em `libs/decode` | **medido em 2026-11-10**: `cargo xtask ci docs` verde (33 testes do xtask, 0 falhas) e `check-docs` com `result: passed`, 193 tasks; a suíte do decode dá 508 verdes, 3 ignorados, 0 falhas. As guardas de `catalog.rs` que recusam `iamf` fora de `immersive-model`, FLAC em WebM e FLAC com perfil em WebM são exercitadas por esse gate |
+| Oráculo independente | leitura campo a campo das 68 entradas de `config/format-catalog.json` contra os quatro critérios: fase/política/operação, decisão NGA, inferência de capability e estado | **medido**: `phase`, `policy` e `operations` faltando em 0 entradas; `target_platforms` vazio em 0; fases M1 4 / M2 10 / M3 30 / M5 24; políticas required 32 / optional 16 / conditional 19 / unsupported 1; **todas as 68 `planned`**. As 10 NGA estão presentes, com fase e política, todas `planned`. **Lacuna medida**: `backend_candidates` tem 3 valores distintos e 65 entradas repetem o marcador, então "confrontado com o backend candidato" não tem objeto em 65 casos. **Ausência medida**: `grep -rniE "true.?peak|bs\.1770|oversampl"` em `config/`, `schemas/`, `crates/`, `tests/` e `specs/` do decode não retorna nada — não há estimador nem pin de oráculo |
+| Hardware | nenhum: o critério é sobre JSON versionado e validação de schema no host, não sobre áudio renderizado | ausência é limitação registrada, não aprovação — e a lacuna do true-peak é a mais séria desta TASK |
 
 ## DoD — pronto para review
 
