@@ -1,9 +1,8 @@
 # TASK-E01-01 — Provar decode, gapless e precisão de samples
 
 > Gerado pelo passo 37 a partir de `tasks/backlog.json`. Os campos de estado vêm do
-> backlog e não devem ser editados aqui. Critério de aceite: **PENDENTE** de autoria —
-> a coluna `Then` é o requisito aprovado, copiado literal; `Given` e `When` ainda
-> não existem.
+> backlog e não devem ser editados aqui. A coluna `Then` é o requisito aprovado,
+> copiado literal do backlog; `Given` e `When` foram autorados na execução.
 
 | Campo | Valor |
 |---|---|
@@ -27,7 +26,22 @@ Spike de decoder registry, corpus básico e ADR-002 com versões/features propos
 
 ## Boundary
 
-<!-- PENDENTE: o que esta TASK não faz, mesmo parecendo relacionado. -->
+- **Não** congela a ADR-002. As notas medem que ela se declara "especificação proposta,
+  implementação não iniciada" e parcialmente substituída pelo ADR-011; congelar aqui
+  criaria uma segunda fonte de verdade para a escolha de backend que a ADR posterior já
+  derrubou. O congelamento é decisão do passo 43, não desta TASK.
+- **Não** escolhe backend de terceiro. O `Cargo.toml` de `vynamp-decode` lista só crates
+  `vynamp-*` do workspace: Symphonia e CPAL não estão lá, e os decoders são Rust próprio.
+  Escolher um candidato aqui contradiria o ADR-011.
+- **Não** prova WAV contra referência de terceiro. WAV é a referência que os outros
+  comparam contra; o que existe para ele é o sha256 do `MANIFEST.txt` e o teste de
+  adulteração. Tratar "WAV decodifica" como comparação seria inventar o oráculo que falta.
+- **Não** torna condicional a preservação de PCM24/32. O `Then` condiciona a um "perfil",
+  e o catálogo não tem regra de precisão por perfil: a preservação medida é incondicional.
+- **Não** cobre AAC, ALAC, Vorbis, Opus, APE, WV ou TTA. O corpus desta TASK é WAV, FLAC e
+  MPEG audio; os outros codecs são `TASK-E01-07` e `TASK-E01-08`.
+- **Não** fixa contratos de priming e preskip por codec. O trim de delay e padding que os
+  testes exercitam é o do `Reader`; o contrato por demux/decoder é `TASK-E17-02`.
 
 ## Antes de começar
 
@@ -47,9 +61,9 @@ Spike de decoder registry, corpus básico e ADR-002 com versões/features propos
 
 | Item | Comando / fixture | Evidência esperada |
 |---|---|---|
-| Teste automatizado | `cargo test` no repo `vynamp-decode` | verde no CI Gate |
-| Oráculo independente | PENDENTE | comparação numérica, não "parece certo" |
-| Hardware | PENDENTE | ausência é limitação registrada, não aprovação |
+| Teste automatizado | `cargo test --workspace --locked` em `libs/decode`, depois `cargo test -p vynamp-decode --test oracle_flac --test oracle_pcm --test oracle_mpeg --locked` | **medido em 2026-11-10**: 508 verdes, 3 ignorados, 0 falhas em 47 suítes; as três suítes de oráculo dão 9 verdes. Os ignorados são os dois `write`/`analyse` de `blackbox.rs` e um doc-test de `testkit/src/alloc.rs` |
+| Oráculo independente | `cargo test -p vynamp-decode --test oracle_flac --test oracle_pcm --test oracle_mpeg --locked`, com as fixtures de `tests/fixtures/{flac,pcm,mpeg}/` e a referência que cada `MANIFEST.txt` nomeia. `oracle_flac.rs` confere sha256, o `STREAMINFO` bps contra `expected_bps(reference)` e compara frame a frame com o WAV ao lado; `oracle_mpeg.rs` confere sha256 do arquivo e da referência `.f32` e aplica o critério ISO/IEC 11172-4 (`rms < 2^-15/√12`, `max ≤ 2^-14`); `oracle_pcm.rs` compara contra o sinal documentado e o hash fixado | **medido**: 9 verdes. Adulterar um byte de `tests/fixtures/pcm/sine-s16le.wav` e repetir o comando dá **exit 101**: `manifest_files_decode_to_the_source` panica em `oracle_pcm.rs:144` com `left: "db4a9e0d…"` contra `right: "1592a474…"`; restaurado o byte, `git status` volta limpo — o hash é medido, não decorativo |
+| Hardware | nenhum: o corpus é WAV/FLAC/MPEG versionado com hash e as comparações são numéricas; nenhum teste abre dispositivo de áudio | ausência é limitação registrada, não aprovação — nada aqui ouve um arquivo |
 
 ## DoD — pronto para review
 
