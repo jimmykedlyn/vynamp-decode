@@ -5,6 +5,8 @@ metadata and CUE, with no crates.io dependencies and no `unsafe` in the library 
 
 **Status:** pre-alpha, public repository. APIs are unstable and nothing is published.
 
+**Specs:** every file in [`specs/`](specs/) is at v0.2.0, an authored draft not yet approved by the maintainer. No number in them is a contract until it is approved.
+
 Security: [GitHub Security Advisories](https://github.com/jimmykedlyn/vynamp-decode/security/advisories/new)
 — see [SECURITY.md](SECURITY.md). This library parses untrusted input.
 
@@ -65,6 +67,8 @@ containers, codecs, metadados e CUE, sem nenhuma dependência do crates.io e sem
 
 **Estado:** pré-alpha, repositório público. As APIs são instáveis e nada foi
 publicado.
+
+**Specs:** todos os arquivos em [`specs/`](specs/) estão em v0.2.0, rascunho autorado ainda não aprovado pelo mantenedor. Nenhum número neles é contrato antes da aprovação.
 
 Segurança: [GitHub Security Advisories](https://github.com/jimmykedlyn/vynamp-decode/security/advisories/new)
 — ver [SECURITY.md](SECURITY.md). Esta biblioteca processa entrada não confiável.
