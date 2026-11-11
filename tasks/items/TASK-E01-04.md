@@ -30,20 +30,23 @@ Adapters local source/probe/decode para WAV/AIFF/FLAC/MP3.
   (`Registry::probe`, `add_container`, `add_codec`, `containers()`, `codecs()`); esta TASK
   entrega os adapters de WAV/AIFF/FLAC/MP3 que se registram nele. Reescrever o registry
   seria trabalho de `TASK-E01-03`, não desta.
-- **Não** lista perfis nem taxas por formato. A API do registry enumera container, nome,
-  extensões e nível de verificação — não há `profiles` nem lista de sample rates no
-  descritor. "Perfis reais" do AC-3 teria de sair do catálogo de planejamento do umbrella,
-  que é dado, não runtime.
-- **Não** lê o catálogo `config/format-catalog.json`. Ele é do umbrella, tem 68 entradas
-  todas `state: planned` e é validado por `cargo xtask ci docs`; o decoder não o consulta
-  em tempo de execução.
+- **Não** lista perfis nem taxas por formato. A API do registry, em
+  `specs/registro-capacidades.md`, enumera container, nome, extensões e nível de
+  verificação — não há `profiles` nem lista de sample rates no descritor. "Perfis
+  reais" do AC-3 teria de sair do catálogo de planejamento do umbrella, que é
+  dado, não runtime.
+- **Não** lê o catálogo `config/format-catalog.json`. Ele é do umbrella, tem 68
+  entradas todas `state: planned` e é validado por `cargo xtask ci docs`, e
+  `specs/registro-capacidades.md` fixa que o decoder não o consulta em tempo de
+  execução.
 - **Não** cobre AAC, ALAC, Vorbis, Opus, APE, WV, TTA, MPC nem WMA. A lista desta TASK é
   WAV, AIFF, FLAC e MP3; o resto é `TASK-E01-07`, `TASK-E01-08` e `TASK-E17-05`.
 - **Não** implementa probing de DSF/DFF, CAF, AU ou Ogg. `TASK-E17-03` e `TASK-E01-09`
   são donas dos containers e do DSD para PCM.
 - **Não** decide política de tamanho máximo por arquivo. Os limites são os de
-  `Limits` (`max_bytes`, `max_frames`, `max_channels`, `max_sample_rate`) e quem os
-  configura é o chamador; o adapter só devolve o erro tipado.
+  `Limits` (`max_bytes`, `max_frames`, `max_channels`, `max_sample_rate`),
+  declarados em `specs/decode.md`, e quem os configura é o chamador; o adapter só
+  devolve o erro tipado.
 
 ## Antes de começar
 
