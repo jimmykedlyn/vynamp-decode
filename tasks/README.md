@@ -25,3 +25,4 @@ Todas de produto; as de engenharia moram no umbrella.
 
 O status oficial é o `tasks/backlog.json` do umbrella. O índice de épico fica lá
 também: uma cópia por repo divergiria.
+Estados conferidos contra o backlog em 2026-11-11.
