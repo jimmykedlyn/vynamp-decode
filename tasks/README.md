@@ -1,9 +1,7 @@
 # tasks — vynamp-decode
 
-
 17 tarefa(s) do backlog com este repositório como dono.
-Todas de produto; as de engenharia moram no umbrella e no engine.
-
+Todas de produto; as de engenharia moram no umbrella.
 
 | ID | Título | Módulo dono | Estado |
 |---|---|---|---|
