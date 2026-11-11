@@ -33,18 +33,20 @@ Catálogo versionado, spikes de backends/licenças e modelo de capability por al
 - **Não** entrega um spike de backend por alvo. `backend_candidates` tem 3 valores
   distintos em 68 entradas e 65 delas repetem o mesmo marcador; não há biblioteca de
   terceiro no repo para medir. A escolha de backend foi decidida pelo ADR-011.
-- **Não** torna nenhum formato `available`. As 68 entradas do catálogo estão `state:
-  planned`, e as 10 NGA — `aac-lc-adts`, `aac-he`, `aac-adif`, `ac3`, `eac3`,
-  `truehd-mlp`, `dts`, `mpeg-h`, `ac4`, `iamf` — também. Viabilidade "sim" aqui seria
-  afirmar implementação que não existe.
-- **Não** implementa o runtime de capability. O que se valida é a forma do JSON contra
-  `schemas/format-catalog.schema.json` e as guardas de `xtask/src/catalog.rs`; inferir
-  capability em runtime continua `M3`.
+- **Não** torna nenhum formato `available`. As 68 entradas do catálogo estão
+  `state: planned`, e as 10 NGA — `aac-lc-adts`, `aac-he`, `aac-adif`, `ac3`,
+  `eac3`, `truehd-mlp`, `dts`, `mpeg-h`, `ac4`, `iamf` — também. Viabilidade "sim"
+  aqui seria afirmar implementação que `specs/formatos.md` ainda não tem.
+- **Não** implementa o runtime de capability. O que se valida é a forma do JSON
+  contra `schemas/format-catalog.schema.json` e as guardas de
+  `xtask/src/catalog.rs`; inferir capability em runtime continua `M3`, como
+  `specs/registro-capacidades.md` declara.
 - **Não** integra xHE-AAC/USAC, AC-4, MPEG-H nem IAMF. `TASK-E17-04`, `TASK-E17-13`,
   `TASK-E17-14` e `TASK-E17-15` são donas desses adapters; aqui só se registra a decisão
   de fase e política.
-- **Não** escreve as fixtures do corpus de codec. O catálogo referencia `sources` vazio em
-  56 das 68 entradas; popular isso é trabalho das TASKs de corpus, não desta.
+- **Não** escreve as fixtures do corpus de codec. O catálogo referencia `sources`
+  vazio em 56 das 68 entradas; popular isso é trabalho das TASKs de corpus, e a
+  divisão está em `specs/formatos.md`, não nesta TASK.
 
 ## Antes de começar
 

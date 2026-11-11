@@ -35,9 +35,11 @@ Spike de decoder registry, corpus básico e ADR-002 com versões/features propos
   Escolher um candidato aqui contradiria o ADR-011.
 - **Não** prova WAV contra referência de terceiro. WAV é a referência que os outros
   comparam contra; o que existe para ele é o sha256 do `MANIFEST.txt` e o teste de
-  adulteração. Tratar "WAV decodifica" como comparação seria inventar o oráculo que falta.
-- **Não** torna condicional a preservação de PCM24/32. O `Then` condiciona a um "perfil",
-  e o catálogo não tem regra de precisão por perfil: a preservação medida é incondicional.
+  adulteração, ambos fixados em `specs/decode.md`. Tratar "WAV decodifica" como
+  comparação seria inventar o oráculo que falta.
+- **Não** torna condicional a preservação de PCM24/32. O `Then` condiciona a um
+  "perfil", e `specs/formatos.md` não tem regra de precisão por perfil: a
+  preservação medida é incondicional.
 - **Não** cobre AAC, ALAC, Vorbis, Opus, APE, WV ou TTA. O corpus desta TASK é WAV, FLAC e
   MPEG audio; os outros codecs são `TASK-E01-07` e `TASK-E01-08`.
 - **Não** fixa contratos de priming e preskip por codec. O trim de delay e padding que os
