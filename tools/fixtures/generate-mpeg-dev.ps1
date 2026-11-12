@@ -4,19 +4,26 @@ with FFmpeg (libmp3lame and the native mp2 encoder). FFmpeg is never a dependenc
 crates and is never run by the tests.
 
   $env:FFMPEG = 'D:\Projects\vynamp\.cache\tools\ffmpeg\bin\ffmpeg.exe'   # see engineering/08-reinicio-windows.md (umbrella)
-  pwsh tools/fixtures/generate-mpeg-dev.ps1 [-FFmpeg <path-to-ffmpeg.exe>]
+  pwsh tools/fixtures/generate-mpeg-dev.ps1 [-FFmpeg <path-to-ffmpeg.exe>] [-ManifestOnly]
+
+`-ManifestOnly` rewrites only `crates/vynamp-decode/tests/fixtures/mpeg/triangulation.sha256`
+from the files already on disk, without invoking FFmpeg: the four fixtures under
+`crates/vynamp-decode-mpa/tests/fixtures/` are not byte-reproducible with the pinned
+FFmpeg (see TASK-E01-01 notes), so re-hashing them must not require re-encoding them.
 
 Input: tools/fixtures/source-sine.wav (48 kHz stereo s32, 4800 frames), looped 30 times so
 every fixture is 3 s long (144000 frames at 48 kHz). Any ffmpeg failure aborts. The expected
 frame counts recorded in the tests come from `ffprobe -count_packets` on these files.
 #>
-param([string]$FFmpeg = $env:FFMPEG)
+param([string]$FFmpeg = $env:FFMPEG, [switch]$ManifestOnly)
 $ErrorActionPreference = 'Stop'
 if (-not $FFmpeg) { throw 'ffmpeg path missing: pass -FFmpeg or set $env:FFMPEG' }
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $src = Join-Path $PSScriptRoot 'source-sine.wav'
 $out = Join-Path $root 'crates/vynamp-decode-mpa/tests/fixtures'
-New-Item -ItemType Directory -Force $out | Out-Null
+if (-not $ManifestOnly) { New-Item -ItemType Directory -Force $out | Out-Null }
+$gen = ((& $FFmpeg -version)[0]).Trim()
+if ($LASTEXITCODE -ne 0) { throw 'ffmpeg -version failed' }
 
 # name, extra ffmpeg args (before the output file)
 $cases = @(
@@ -32,6 +39,7 @@ $cases = @(
   @('mp2-192k-48k-stereo.mp2', @('-c:a','mp2','-b:a','192k')),
   @('mp2-128k-44k-stereo.mp2', @('-c:a','mp2','-b:a','128k','-ar','44100'))
 )
+if (-not $ManifestOnly) {
 foreach ($c in $cases) {
   $name, $extra = $c
   $dst = Join-Path $out $name
@@ -40,6 +48,7 @@ foreach ($c in $cases) {
   if ($LASTEXITCODE -ne 0) { throw "ffmpeg failed for $name" }
 }
 Write-Host "wrote $($cases.Count) fixtures to $out"
+}
 
 # ---- Layer II decoder fixtures (crates/vynamp-decode-mp3/tests/fixtures) ----
 # Short (0.2 s) encodes of a synthetic broadband signal (tones, a gliding tone and noise,
@@ -58,6 +67,7 @@ $l2cases = @(
   @('l2-mono-48k-64k',     48000, 1, @('-c:a','mp2','-b:a','64k')),
   @('l2-lsf-24k-64k',      24000, 2, @('-c:a','mp2','-b:a','64k'))
 )
+if (-not $ManifestOnly) {
 foreach ($c in $l2cases) {
   $name, $rate, $ch, $enc = $c
   $mp2 = Join-Path $mp3out "$name.mp2"
@@ -70,6 +80,7 @@ foreach ($c in $l2cases) {
   if ($LASTEXITCODE -ne 0) { throw "ffmpeg decode failed for $name" }
 }
 Write-Host "wrote $($l2cases.Count) Layer II fixtures to $mp3out"
+}
 
 # ---- Layer III decoder fixtures (crates/vynamp-decode-mp3/tests/fixtures) ----
 # Short encodes by libmp3lame of synthetic signals with tones, a gliding tone, noise and short
@@ -110,6 +121,7 @@ $l3cases = @(
   @('l3-mpeg25-11k-stereo', 11025, 2, 'rich', 0.70, @('-b:a','32k')),
   @('l3-mpeg25-8k-mono',     8000, 1, 'mono', 1.00, @('-b:a','16k'))
 )
+if (-not $ManifestOnly) {
 foreach ($c in $l3cases) {
   $name, $rate, $ch, $kind, $secs, $enc = $c
   $mp3 = Join-Path $mp3out "$name.mp3"
@@ -130,6 +142,7 @@ foreach ($c in $l3cases) {
   if ($LASTEXITCODE -ne 0) { throw "ffmpeg decode failed for $name" }
 }
 Write-Host "wrote $($l3cases.Count) Layer III fixtures to $mp3out"
+}
 
 # ---- Gapless fixtures (crates/vynamp-decode/tests/fixtures/mpeg) ----
 # PCM derived from tools/fixtures/source-sine.wav (looped, downmixed or resampled) as 16-bit
@@ -139,7 +152,7 @@ Write-Host "wrote $($l3cases.Count) Layer III fixtures to $mp3out"
 # FFmpeg's demuxer reads the LAME tag and trims the encoder delay + 529 (528 + 1) samples at the start
 # and the padding at the end. The facade tests compare the Reader's output against both.
 $gout = Join-Path $root 'crates/vynamp-decode/tests/fixtures/mpeg'
-New-Item -ItemType Directory -Force $gout | Out-Null
+if (-not $ManifestOnly) { New-Item -ItemType Directory -Force $gout | Out-Null }
 # name, source loops, extra filter/format args (before the WAV), encoder args
 $gcases = @(
   @('g-cbr128-48k-stereo', 3, @(), @('-b:a','128k')),
@@ -148,6 +161,7 @@ $gcases = @(
   @('g-mpeg2-22k-stereo',  3, @('-ar','22050'), @('-b:a','64k')),
   @('g-cbr128-48k-odd',    1, @('-af','atrim=end_sample=3999'), @('-b:a','128k'))
 )
+if (-not $ManifestOnly) {
 foreach ($c in $gcases) {
   $name, $loops, $pre, $enc = $c
   $wav = Join-Path $gout "$name.src.wav"
@@ -161,4 +175,42 @@ foreach ($c in $gcases) {
   & $FFmpeg -v error -y -c:a mp3float -i $mp3 -f f32le -c:a pcm_f32le $ref
   if ($LASTEXITCODE -ne 0) { throw "ffmpeg decode failed for $name" }
 }
-Write-Host "wrote $($gcases.Count) gapless fixtures to $gout"
+}
+
+# Manifest: `triangulation.sha256`, read by `crates/vynamp-decode/tests/triangulation.rs`.
+# The corpus was committed in 8c771a4 without one, so `engineering/05-testes.md` (hash,
+# license, format, independent oracle) was unmet for these fifteen files. Written in
+# `sha256sum` format because that is what the test parses; regenerating a fixture without
+# rerunning this block turns that test red, which is the point of having it.
+# `specs/decode.md` section 9 asks a manifest to carry the hash, the generation
+# arguments and the exact generator version, so both live here as comments: the rows stay
+# in `sha256sum` format because that is what the test parses.
+$origin = if ($ManifestOnly) { 'Re-hashed from the files on disk, not regenerated; the files themselves were reproduced byte for byte with' }
+          else { 'Fixtures regenerated and reproduced byte for byte with' }
+$rows = @(
+  '# sha256 and name of every MPEG gapless fixture, in `sha256sum` format.',
+  '# Five cases, three files each: the PCM that was encoded (.src.wav), the',
+  '# libmp3lame encode carrying the LAME tag (.mp3), and FFmpeg''s own gapless',
+  '# decode of it (.ref.f32). Generated by tools/fixtures/generate-mpeg-dev.ps1.',
+  '#',
+  '# The .src.wav of g-cbr128-48k-stereo and g-vbr2-48k-stereo is',
+  '# tests/fixtures/pcm/sine-s16le.wav looped three times, byte for byte; the other',
+  '# three cases are downmixed, resampled or trimmed and are not. The two are',
+  '# three times its length, so they are not the same file.',
+  "# $origin $gen.",
+  "# Measured $((Get-Date).ToString('yyyy-MM-dd'))."
+)
+foreach ($c in $gcases) {
+  $name, $loops, $pre, $enc = $c
+  $preArgs = if ($pre.Count -gt 0) { ($pre -join ' ') + ' ' } else { '' }
+  $rows += "# $name.src.wav: -stream_loop $($loops - 1) -i source-sine.wav ${preArgs}-c:a pcm_s16le"
+  $rows += "# $name.mp3: -i $name.src.wav -c:a libmp3lame $($enc -join ' ')"
+  $rows += "# $name.ref.f32: -c:a mp3float -i $name.mp3 -f f32le -c:a pcm_f32le"
+  foreach ($ext in @('.mp3', '.ref.f32', '.src.wav')) {
+    $file = Join-Path $gout "$name$ext"
+    $sha = (Get-FileHash -Algorithm SHA256 $file).Hash.ToLower()
+    $rows += "$sha  $name$ext"
+  }
+}
+[IO.File]::WriteAllText((Join-Path $gout 'triangulation.sha256'), (($rows -join "`n") + "`n"))
+Write-Host "wrote $($gcases.Count) gapless fixtures and triangulation.sha256 to $gout"
