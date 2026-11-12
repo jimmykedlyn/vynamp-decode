@@ -3,7 +3,7 @@ Dev-only: regenerates the small FLAC fixtures in crates/vynamp-decode-flac/tests
 with FFmpeg. FFmpeg is never a dependency of the crates and is never run by the tests.
 Task 9 builds the full corpus; these files only exercise frame sync and seek.
 
-  . D:\Projects\vynamp-media-player\AMBIENTE.ps1   # sets $env:FFMPEG
+  $env:FFMPEG = 'D:\Projects\vynamp\.cache\tools\ffmpeg\bin\ffmpeg.exe'   # see engineering/08-reinicio-windows.md (umbrella)
   pwsh tools/fixtures/generate-flac-dev.ps1 [-FFmpeg <path-to-ffmpeg.exe>]
 
 Input: tools/fixtures/source-sine.wav (48 kHz stereo s32, 4800 frames). Any ffmpeg failure aborts.
