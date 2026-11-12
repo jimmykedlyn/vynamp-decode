@@ -10,10 +10,10 @@
 | Módulo dono | `vynamp-decode` |
 | Repo | `jimmykedlyn/vynamp-decode` |
 | REQ coberto | `REQ-E01-01` |
-| Critérios da spec | pendente — `specs/decode.md` §5 |
+| Critérios da spec | `specs/decode.md` §5 — `DECODE-AC-05`, `-06`, `-07`, `-20`, `-21`, `-22`, `-28` a `-31` |
 | Fase | M0 |
 | Prioridade | P0 |
-| Estado | planned |
+| Estado | implemented |
 | Depende de | `TASK-E11-01` |
 | Bloqueia | `TASK-E01-03`, `TASK-E04-02`, `TASK-E13-01` |
 | Modelo executor | Opus — áudio/RT, concorrência, segurança ou release |
@@ -47,10 +47,18 @@ Spike de decoder registry, corpus básico e ADR-002 com versões/features propos
 
 ## Antes de começar
 
-- [ ] Spec do módulo aprovada e o critério de aceite citado já existe nela
-- [ ] Worktree própria criada (`cargo xtask repo worktree task-e01-01-claude-<slug>`)
-- [ ] Fixtures/hardware necessários disponíveis ou limitação registrada
-- [ ] Nenhuma TASK em execução tocando os mesmos arquivos
+- [x] Spec do módulo aprovada e o critério de aceite citado já existe nela — a spec
+  `specs/decode.md` está **autorada e não aprovada** (v0.3.0, estado no cabeçalho) e §5
+  nomeia os testes de `triangulation.rs` em `DECODE-AC-28` a `-31`
+- [x] Worktree própria criada (`cargo xtask repo worktree task-e01-01-claude-<slug>`) —
+  medido: `cargo xtask repo worktree` existe só no umbrella e cria worktree de umbrella,
+  que não isola o código do módulo; a branch de trabalho foi aberta no próprio submódulo,
+  como no precedente `TASK-E04-02`. `git worktree list` e `.git/auralis/claims/` vazios
+- [x] Fixtures/hardware necessários disponíveis ou limitação registrada — fixtures
+  versionadas com hash; **hardware: nenhum**, e a ausência está registrada na linha
+  `Hardware` de §Verificação
+- [x] Nenhuma TASK em execução tocando os mesmos arquivos — nenhum outro worktree no
+  umbrella nem no submódulo, e nenhuma claim ativa em 2026-11-12
 
 ## Critérios de aceite
 
@@ -69,58 +77,53 @@ Spike de decoder registry, corpus básico e ADR-002 com versões/features propos
 
 ## DoD — pronto para review
 
-- [ ] Todos os critérios de aceite com evidência
-- [ ] `cargo fmt --check` e `cargo clippy --all-targets -- -D warnings` limpos
-- [ ] `cargo test` verde; testes ignorados listados com motivo
-- [ ] Spec do módulo atualizada se a implementação revelou algo novo
-- [ ] `backlog.json` com o estado correto
-- [ ] Revisão feita por contexto limpo, não pelo implementador
-- [ ] PR aberto com template preenchido; CI Gate verde no SHA final
-## Notas de execução
+- [x] Todos os critérios de aceite com evidência — tabela de `## Notas de execução
 
-Medido em 2026-11-09. Provas em `evidence/PR/task-e01-01/`.
+Fechada em 2026-11-12. A evidência da suíte desta execução entra em
+`evidence/PR/task-e01-01/` no umbrella, pelo PR de repin que segue o merge deste — antes
+do merge não há SHA de módulo para a evidência apontar.
 
-| AC | Verificação executada | Resultado |
+A nota anterior desta seção dava o AC-1 por "satisfeito para FLAC e MP3, não literal para
+WAV". O erro estava no meio da frase: **para MP3 o `Then` também não é literal**, porque
+um codec com perda não decodifica sample a sample para o PCM de origem. Ela também não
+mencionava que o corpus de MP3 gapless estava versionado **sem manifesto** — quinze
+arquivos sem hash, contra a regra de `engineering/05-testes.md`. As duas coisas foram
+corrigidas nesta execução, e a nota antiga não é apagada do histórico: o `git log` guarda
+as duas versões.
+
+| AC | O que foi executado | Resultado |
 |---|---|---|
-| AC-1 | `cargo test --workspace --locked` em `vynamp-decode` (508 testes verdes, 3 ignorados, 0 falhas). Os três oráculos que importam: `tests/oracle_flac.rs:83` `every_manifest_file_has_its_hash_and_decodes_to_the_reference`, `tests/oracle_pcm.rs`, `tests/oracle_mpeg.rs`. Cada lê o MANIFEST, confere sha256 do arquivo, decodifica e compara contra o WAV/f32 de referência: rate, formato, samples, e `expected_bps(reference)` (`oracle_flac.rs:73`) contra o STREAMINFO | **Satisfeito para FLAC e MP3, não literal para WAV.** FLAC: referência WAV ao lado de cada `.flac` e comparação sample a sample. MP3: referência `.f32` de cada arquivo. **WAV é o que se compara *contra*, não se compara *com***: um WAV não tem WAV de referência, ele é a referência. O `Then` pede os três contra referência; para WAV o que existe é o sha256 no manifesto + as provas de verificações de `oracle_pcm.rs` (adulteração de um byte → `exit 101`). Registro como leitura: "WAV decodifica" está provado pelo hash e pela reação à adulteração, não por comparação contra terceiro |
-| AC-1, delay/padding | `crates/vynamp-decode/tests/facade.rs`: `gapless_delay_and_padding_span_packets` (503), `frames_and_position_follow_the_trimmed_timeline` (560), `delay_plus_padding_beyond_frames_is_empty` (578), `unknown_length_still_trims_delay` (588); `crates/vynamp-decode-mpa/tests/demux.rs:223` `lame_tag_gives_exact_gapless_numbers` e `:1268` `a_tag_that_does_not_fit_the_frame_count_is_a_gapless_conflict`. Implementação em `crates/vynamp-decode/src/reader.rs:58-70` (`skip_until: delay`, `enforce_end: track.padding > 0`) e `:100-108` (trimmed frames) | **Satisfeito.** Delay e padding são cortados na facada e os testes cobrem o caso normal, o que passa de `frames`, o comprimento desconhecido e o conflito com tag |
-| AC-2, PCM24/32 | `crates/vynamp-decode-pcm/tests/pcm.rs:96` `s24_both_endians_sign_extend` e `:113` `s32_both_endians`. Fixtures `tests/fixtures/pcm/sine-s24le.wav`, `sine-s32le.wav`, `sine-s24be.aif`, `sine-6ch-s24le.wav` — todos no MANIFEST. `SampleFormat::{I24, I32}` com armazenamento compartilhado em `crates/vynamp-decode-core/src/buffer.rs:10,85-101` | **Satisfeito.** Os dois formatos existem, têm fixture com hash no manifesto e teste dos dois endianness com extensão de sinal |
-| AC-2, "quando perfil permite" | o `Then` condiciona a preservação a um **perfil**; o catálogo (`config/format-catalog.json`) tem `profiles` como lista de strings, sem regra de precisão por perfil | **A condição não tem objeto.** Não existe perfil que habilite ou desabilite PCM24/32 no produto hoje. Preservação medida e incondicional |
+| AC-1, um tom só | `crates/vynamp-decode/tests/triangulation.rs:233` `wav_flac_and_mp3_of_the_same_tone_decode_against_one_reference`. Afirma primeiro que `tests/fixtures/pcm/sine-s16le.wav` e `tests/fixtures/flac/ref/st16-48k.wav` têm o **mesmo sha256** (`1592a474…`): a referência do FLAC é o próprio fixture PCM. Depois compara cada perna: WAV e FLAC, ambos `I16`, 4 800 frames, iguais ao tom de origem deslocado (`>>16`), e iguais **entre si**; MP3 (`g-cbr128-48k-stereo`), `F32`, 14 400 frames, acima de 20 dB de SNR contra o mesmo tom | **Satisfeito, com o critério que cada perna permite.** WAV e FLAC: igualdade exata. MP3: perda impede igualdade, então o critério é SNR contra a origem — **medido 25,9 dB** — mais o critério ISO/IEC 11172-4 contra o decode do FFmpeg, medido em `tests/mpeg.rs` (`rms 3,1e-7`, `max 1,6e-6`, ambos abaixo de `2^-15/√12` e `2^-14`). O `Then` literal ("sample a sample com o WAV de origem") é satisfeito para os dois lossless e não tem objeto para o MP3 |
+| AC-1, hash do corpus | `triangulation.rs:142` `every_gapless_fixture_has_its_hash_in_the_manifest` sobre o novo `crates/vynamp-decode/tests/fixtures/mpeg/triangulation.sha256`: 15 entradas, sha256 conferido arquivo a arquivo, e a lista do manifesto tem de ser exatamente a do diretório (subset reprova). `triangulation.rs:174` `a_flipped_byte_leaves_the_pinned_hash` prova que o hash morde: um bit trocado no `.src.wav` sai do valor fixado | **Satisfeito.** O manifesto é gerado por medição, não digitado: `tools/fixtures/generate-mpeg-dev.ps1` passou a escrevê-lo, e as 15 fixtures foram reproduzidas **byte a byte** com ffmpeg `n8.1.3-35`. Adulterar um hash no manifesto faz o teste falhar (`exit 101`), verificado |
+| AC-2, delay/padding | `triangulation.rs:292` `the_gapless_trim_is_declared_by_mpeg_and_absent_in_flac`. FLAC (`st16-level0`): `delay == 0`, `padding == 0`, `gapless == Exact`, saída = 4 800 = `total_samples`. MP3 com tag LAME: `delay == 1105`, `padding == 623`, `gapless == FromMetadata`, e `14 400 + 1105 + 623 == 16 128` frames declarados | **Satisfeito no codec que declara os campos, e a condição do AC não existe no FLAC.** O `Then` pede "delay e padding declarados no streaminfo"; o STREAMINFO do RFC 9639 §8.2 tem 34 bytes e nenhum campo para isso — o codec é lossless, sem priming. Registrado como limitação em `specs/decode.md` §10, que é onde o contrato manda registrar divergência de referência |
+| AC-2, PCM24/32 | `triangulation.rs:323` `pcm24_and_pcm32_keep_every_valid_bit`: `sine-s32le.wav` (`I32`) é igual ao tom de origem, e `sine-s24le.wav` (`I24`) é igual ao tom `>>8`, amostra a amostra. O teste também afirma que o tom de origem **tem** bits abaixo do corte de 16 — sem isso o fixture `s24` seria um `s16` esticado e passaria sem provar nada sobre os 8 bits baixos | **Satisfeito.** Complementa, sem substituir, `vynamp-decode-pcm/tests/pcm.rs:96` e `:113`, que cobrem os dois endianness e a extensão de sinal |
+| AC-2, "quando perfil permite" | o catálogo `config/format-catalog.json` tem `profiles` como lista de strings, sem regra de precisão por perfil | **A condição continua sem objeto.** Nenhum perfil habilita ou desabilita PCM24/32 no produto; a preservação medida é incondicional |
 
-**O que esta TASK não provou, e o que ela produziria se fosse feita.**
+**Estado da suíte.** `cargo test --workspace --locked` em 2026-11-12: **513 verdes, 3
+ignorados, 0 falhas**, em 48 suítes. Os cinco novos são os de `triangulation.rs`. Os três
+ignorados são os mesmos de antes, cada um com motivo escrito: `blackbox::intensity_probe_gains`
+e `blackbox::write_blackbox_streams` ("writes and analyses scratch files for the black-box
+comparison") e o doc-test de `alloc.rs`. `cargo fmt --all --check` e `cargo clippy
+--workspace --all-targets -- -D warnings` limpos. `cargo machete` não está instalado neste
+ambiente: ausência registrada, não pulada em silêncio.
 
-O `deliverable` é "Spike de decoder registry, corpus básico e **ADR-002** com
-versões/features propostas". Medido:
+**O que continua de fora, e por quê.**
 
-- **O spike de registry existe, mas não é o que o `deliverable` pede.** A frase
-  anterior desta nota dizia que `find . -name "*.rs" | grep -i registry` não retorna
-  nada. **Está errada**: `crates/vynamp-decode-core/src/registry.rs` existe desde
-  `7f47c0a` (2026-10-23), duas semanas antes desta medição, e é código de runtime —
-  `Registry`, `ContainerDescriptor`, `CodecDescriptor`, `Verification`, `probe()`
-  com skip de ID3v2 e desempate por extensão, `codec_for()`. `crates/vynamp-decode/src/lib.rs:106`
-  registra quatro containers (RIFF, AIFF, FLAC, MPA) e quatro codecs. A conclusão que
-  sobrou é mais estreita e continua de pé: **esse registry é o do produto, não um
-  spike**, e o que o `deliverable` pede em separado é o ADR-002 com versões/features.
-  O outro catálogo, `config/format-catalog.json` + `xtask/src/catalog.rs` (68
-  entradas, validação de `required`/alvos/`association_allowed`), é **planejamento**,
-  não runtime: marca as 68 entradas `state: planned`, e
-  `reference/audio/06-codec-capability-registry.md:5` diz "Sem decoder implementado
-  neste pacote, nenhum perfil é anunciado disponível".
-  O backend candidato do ADR-002 (Symphonia/CPAL) **não existe no `Cargo.toml`** do
-  decode: os codecs são Rust próprio, sem candidato nomeado.
-- **ADR-002 está proposto, não congelado.** `adr/ADR-002-audio-core.md:3`:
-  "Estado: especificação proposta, implementação não iniciada… congelar após
-  TASK-E01-01/TASK-E01-02". E o rodapé diz: "Parcialmente substituída por
-  [ADR-011](ADR-011-pilha-propria.md)". Congelar ADR-002 neste estado seria
-  congelar uma decisão que o próprio arquivo reconhece como parcialmente
-  substituída — o passo 43 (congelar ADRs) precisa decidir isso antes.
+- **HARDWARE: nenhum.** Nada aqui ouve um arquivo. Todas as comparações são numéricas
+  contra referência versionada, e nenhum teste abre dispositivo de áudio.
+- **O `deliverable` pedia "Spike de decoder registry".** O registry existe e é de
+  **produto** (`crates/vynamp-decode-core/src/registry.rs`, desde `7f47c0a`), não um
+  spike; a distinção não tem objeto. As versões e features que o `deliverable` também
+  pedia estão escritas na §"Backend, versões e features" da ADR-002.
+- **A ADR-002 não foi congelada aqui**, e a Boundary desta TASK o proíbe: o congelamento
+  é do passo 43, e a ADR-011 substituiu parte dela.
+- **`cargo machete` ausente** neste ambiente; o `ci-lib.yml` do módulo trata ausência como
+  registro, não como portão.
 
-**Custo se essa leitura estiver errada:** se o mantenedor considerar que a suíte de
-oráculos mais o `registry.rs` de runtime já são o "spike de registry", a TASK fecha
-com AC-1 e AC-2 satisfeitos, com a ressalva de WAV, e o que sobra é só o ADR-002. Se
-a leitura correta for que o registry spike e o ADR-002 congelado são entregáveis
-separáveis, a TASK fica em dois blocos: a prova de decodificação está feita, o ADR
-não — e o ADR não pode ser congelado enquanto ADR-011 o substituir parcialmente.
-
-**Limitação honesta:** nenhuma dessas medições foi feita em hardware de áudio. Nada
-aqui ouve um arquivo; tudo é comparação numérica contra referência versionada.
+**Limitação achada de passagem, não corrigida.** Rodar
+`tools/fixtures/generate-mpeg-dev.ps1` inteiro regera quatro fixtures de
+`crates/vynamp-decode-mpa/tests/fixtures/` com **bytes diferentes e o mesmo tamanho**
+(`cbr128-44k-stereo.mp3`, `cbr128-48k-stereo.mp3`, `mpeg2-22k-stereo.mp3`,
+`nolame-cbr128-48k.mp3`). As fifteen do gapless são reproduzíveis byte a byte; essas
+quatro não são. O defeito é do gerador ou da versão do libmp3lame, é anterior a esta TASK
+e não pertence a ela — fica registrado para a TASK que for dona do corpus MPEG.

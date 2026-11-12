@@ -5,7 +5,7 @@ Todas de produto; as de engenharia moram no umbrella.
 
 | ID | Título | Módulo dono | Estado |
 |---|---|---|---|
-| `TASK-E01-01` | Provar decode, gapless e precisão de samples | vynamp-decode | planned |
+| `TASK-E01-01` | Provar decode, gapless e precisão de samples | vynamp-decode | implemented |
 | `TASK-E01-04` | Entregar fonte local e decoder registry | vynamp-decode | planned |
 | `TASK-E01-07` | Adicionar codecs modernos e capítulos | vynamp-decode | planned |
 | `TASK-E01-08` | Completar codecs desktop e large files | vynamp-decode | planned |
@@ -25,4 +25,5 @@ Todas de produto; as de engenharia moram no umbrella.
 
 O status oficial é o `tasks/backlog.json` do umbrella. O índice de épico fica lá
 também: uma cópia por repo divergiria.
-Estados conferidos contra o backlog em 2026-11-11.
+Estados conferidos contra o backlog em 2026-11-12; `TASK-E01-01` fecha neste repo e o
+backlog do umbrella passa a `implemented` no PR de repin que segue o merge.
