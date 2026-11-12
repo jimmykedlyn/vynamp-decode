@@ -2,7 +2,7 @@
 Dev-only: regenerates tests/fixtures/pcm/* and tests/fixtures/flac/* (with MANIFEST.txt) with FFmpeg.
 FFmpeg is never a dependency of the crates and is never run by the tests.
 
-  . D:\Projects\vynamp-media-player\AMBIENTE.ps1   # sets $env:FFMPEG
+  $env:FFMPEG = 'D:\Projects\vynamp\.cache\tools\ffmpeg\bin\ffmpeg.exe'   # see engineering/08-reinicio-windows.md (umbrella)
   pwsh tools/fixtures/generate.ps1 [-FFmpeg <path-to-ffmpeg.exe>]
 
 Input: tools/fixtures/source-sine.wav (48 kHz stereo s32, 4800 frames, made by

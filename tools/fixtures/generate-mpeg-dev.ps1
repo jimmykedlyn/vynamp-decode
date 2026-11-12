@@ -3,7 +3,7 @@ Dev-only: regenerates the small MPEG audio fixtures in crates/vynamp-decode-mpa/
 with FFmpeg (libmp3lame and the native mp2 encoder). FFmpeg is never a dependency of the
 crates and is never run by the tests.
 
-  . D:\Projects\vynamp-media-player\AMBIENTE.ps1   # sets $env:FFMPEG
+  $env:FFMPEG = 'D:\Projects\vynamp\.cache\tools\ffmpeg\bin\ffmpeg.exe'   # see engineering/08-reinicio-windows.md (umbrella)
   pwsh tools/fixtures/generate-mpeg-dev.ps1 [-FFmpeg <path-to-ffmpeg.exe>]
 
 Input: tools/fixtures/source-sine.wav (48 kHz stereo s32, 4800 frames), looped 30 times so
