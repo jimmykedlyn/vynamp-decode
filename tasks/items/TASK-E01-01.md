@@ -47,9 +47,11 @@ Spike de decoder registry, corpus básico e ADR-002 com versões/features propos
 
 ## Antes de começar
 
-- [x] Spec do módulo aprovada e o critério de aceite citado já existe nela — a spec
-  `specs/decode.md` está **autorada e não aprovada** (v0.3.0, estado no cabeçalho) e §5
-  nomeia os testes de `triangulation.rs` em `DECODE-AC-28` a `-31`
+- [ ] Spec do módulo aprovada e o critério de aceite citado já existe nela — **a metade do
+  critério está cumprida, a aprovação não:** a spec `specs/decode.md` está **autorada e não
+  aprovada** (v0.3.0, estado no cabeçalho) e §5 nomeia os testes de `triangulation.rs` em
+  `DECODE-AC-28` a `-31`, mas a aprovação é do mantenedor por `GOVERNANCE.md`. O item fica
+  aberto de propósito: marcá-lo afirmaria uma aprovação que não houve
 - [x] Worktree própria criada (`cargo xtask repo worktree task-e01-01-claude-<slug>`) —
   medido: `cargo xtask repo worktree` existe só no umbrella e cria worktree de umbrella,
   que não isola o código do módulo; a branch de trabalho foi aberta no próprio submódulo,
@@ -88,8 +90,11 @@ Spike de decoder registry, corpus básico e ADR-002 com versões/features propos
   §9 o corpus de gapless com manifesto
 - [x] `backlog.json` com o estado correto — `implemented` no umbrella, no PR de repin que
   segue o merge deste
-- [ ] Revisão feita por contexto limpo, não pelo implementador — **pendente:** quem
-  escreveu não revisa; a revisão é do subagente `revisor` sobre o diff, em contexto limpo
+- [x] Revisão feita por contexto limpo, não pelo implementador — subagente `revisor` (Opus,
+  `model:` explícito, nenhuma herança da sessão) sobre o diff contra `origin/develop` em
+  `bac45e2`: **APROVADO COM RESSALVAS**, 8 achados. Cinco foram corrigidos nesta TASK
+  (o detalhe está em §Notas de execução), um foi recusado com motivo medido, um fica com o
+  mantenedor porque mexe no requisito aprovado, e um é fragilidade aceita com justificativa
 - [x] PR aberto com template preenchido; CI Gate verde no SHA final — PR
   [#27](https://github.com/jimmykedlyn/vynamp-decode/pull/27), base `develop`, template
   preenchido; `CI Gate` verde em `292897d` com `fmt`, `clippy`, `test` e `machete` todos
@@ -138,6 +143,25 @@ ambiente: ausência registrada, não pulada em silêncio.
   é do passo 43, e a ADR-011 substituiu parte dela.
 - **`cargo machete` ausente** neste ambiente; o `ci-lib.yml` do módulo trata ausência como
   registro, não como portão.
+
+**Revisão em contexto limpo.** O subagente `revisor` devolveu **APROVADO COM RESSALVAS** com
+8 achados e a árvore limpa nos dois repos. O que mudou depois disso:
+
+| # | Achado | Desfecho |
+|---|---|---|
+| 1 | a spec ganhou `DECODE-AC-31` reescrito e o `Then` aprovado do `backlog.json` não mudou | **do mantenedor.** O contrato proíbe o agente de mudar requisito aprovado; a emenda ao `Then` vai no PR de repin, para decisão dele |
+| 2 | `assert!(snr > 20.0)` é limiar fixo a 4,9 dB do medido (25,9) | **aceito como está.** O encode está hasheado em `triangulation.sha256`, então não muda com a versão do encoder; o que move o SNR é o decoder, que é o que o teste deve pegar |
+| 3 | os laços comparavam com `zip`, que trunca no menor — um plano curto passava | **corrigido.** `assert_eq!(plane.len(), source[c].len())` antes de cada laço, nas quatro pernas. Provado por sonda: forçar um frame a menos no plano do WAV falha com `wav channel 0 length` em `triangulation.rs:273`, e a sonda foi revertida |
+| 4 | o manifesto não guardava os argumentos de geração, que `specs/decode.md` §9 exige | **corrigido.** Três linhas de comentário por caso com os args exatos do `.src.wav`, do `.mp3` e do `.ref.f32`; o parser do teste descarta `#` |
+| 5 | o comentário do gerador dizia que o `.src.wav` é "also `sine-s16le.wav`", e não é | **corrigido.** Medido: `g-cbr128-48k-stereo.src.wav` e `g-vbr2-48k-stereo` são o fixture PCM repetido três vezes, byte a byte; os outros três não. O comentário agora diz isso, e o mesmo texto foi corrigido no manifesto |
+| 6 | os hashes da comparação em `:239` não estariam fixados em lugar nenhum | **recusado.** Estão: `sine-s16le.wav` na linha 3 do `tests/fixtures/pcm/MANIFEST.txt` e `ref/st16-48k.wav` na linha 2 do `tests/fixtures/flac/MANIFEST.txt`, ambos conferidos contra o valor fixado por `oracle_pcm.rs:143` e `oracle_flac.rs:91`, que percorre também as linhas `kind=ref`. Trocar qualquer um dos dois quebra esses testes |
+| 7 | o `* 32768.0` assume que o f32 do MP3 está em ±1.0, sem verificar | **corrigido.** `assert_full_scale` afirma que o pico está dentro da grade s16 e acima de um oitavo dela, com o contrato citado (`crates/vynamp-decode-mp3/src/lib.rs:4`); uma mudança de escala falha ali em vez de virar colapso de SNR |
+| 8 | o checkbox "Spec do módulo aprovada" estava marcado sobre um texto que diz "não aprovada" | **corrigido ao contrário do que o revisor pediu para os demais:** o item foi **desmarcado**, com o motivo escrito. Marcá-lo afirmaria uma aprovação que o mantenedor não deu |
+
+O comando `pwsh tools/fixtures/generate-mpeg-dev.ps1 -ManifestOnly` nasceu aqui: ele reescreve
+só o `triangulation.sha256` a partir dos arquivos em disco, sem invocar o FFmpeg, porque as
+quatro fixtures de `vynamp-decode-mpa/tests/fixtures/` não são reproduzíveis byte a byte e
+re-hashear o corpus não pode exigir reencodá-las.
 
 **Limitação achada de passagem, não corrigida.** Rodar
 `tools/fixtures/generate-mpeg-dev.ps1` inteiro regera quatro fixtures de

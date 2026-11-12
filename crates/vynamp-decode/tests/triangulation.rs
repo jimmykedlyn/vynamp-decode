@@ -86,7 +86,11 @@ fn decode(path: &Path) -> Decoded {
                     .map(|&v| i64::from(v))
                     .collect(),
                 // MP3 decodes to f32. Scaling to the s16 integer grid keeps every
-                // comparison in one unit: 32768.0 is one step of the 16-bit source.
+                // comparison in one unit: 32768.0 is one step of the 16-bit source. The
+                // scale is the decoder's contract, not this test's guess — `vynamp-decode-mp3`
+                // documents full scale as plus or minus 1.0 — and `assert_full_scale` below
+                // proves the files actually use it, so a contract change fails there instead
+                // of showing up as a mysterious SNR collapse.
                 SampleFormat::F32 => buf
                     .plane_f32(c)
                     .unwrap()
@@ -222,6 +226,23 @@ fn snr_db(got: &[Vec<i64>], want: &[Vec<i64>]) -> f64 {
     10.0 * (signal / error).log10()
 }
 
+/// The f32 legs really are in [-1.0, 1.0], which is what `* 32768.0` assumes.
+///
+/// `AudioBuffer` does not carry a scale, so the unit conversion above would silently
+/// produce garbage on a decoder that switched to full scale = 32768.0. Asserting the range
+/// turns that into a named failure here instead of an SNR that points at the wrong leg.
+fn assert_full_scale(path: &Path, planes: &[Vec<i64>]) {
+    let peak = planes.iter().flatten().map(|v| v.abs()).max().unwrap_or(0);
+    assert!(
+        peak <= 32768,
+        "{path:?}: peak {peak} on the s16 grid means the decoder is not in [-1.0, 1.0]"
+    );
+    assert!(
+        peak > 32768 / 8,
+        "{path:?}: peak {peak} on the s16 grid is too quiet to prove the scale"
+    );
+}
+
 /// AC-1: WAV, FLAC and MP3 all come from one tone, and each is checked against it.
 ///
 /// The WAV and FLAC legs are exact: s16 samples must equal the source's top 16 bits,
@@ -248,6 +269,7 @@ fn wav_flac_and_mp3_of_the_same_tone_decode_against_one_reference() {
     assert_eq!(wav.format, SampleFormat::I16, "wav format");
     assert_eq!(wav.frames, 4_800, "wav frames");
     for (c, plane) in wav.planes.iter().enumerate() {
+        assert_eq!(plane.len(), source[c].len(), "wav channel {c} length");
         for (i, (&got, &src)) in plane.iter().zip(&source[c]).enumerate() {
             assert_eq!(got, src >> 16, "wav channel {c} frame {i}");
         }
@@ -259,6 +281,7 @@ fn wav_flac_and_mp3_of_the_same_tone_decode_against_one_reference() {
     assert_eq!(flac.format, SampleFormat::I16, "flac format");
     assert_eq!(flac.frames, 4_800, "flac frames");
     for (c, plane) in flac.planes.iter().enumerate() {
+        assert_eq!(plane.len(), source[c].len(), "flac channel {c} length");
         for (i, (&got, &src)) in plane.iter().zip(&source[c]).enumerate() {
             assert_eq!(got, src >> 16, "flac channel {c} frame {i}");
         }
@@ -275,6 +298,7 @@ fn wav_flac_and_mp3_of_the_same_tone_decode_against_one_reference() {
         .iter()
         .map(|p| p.iter().map(|&v| v >> 16).cycle().take(3 * 4_800).collect())
         .collect();
+    assert_full_scale(&gapless_dir().join("g-cbr128-48k-stereo.mp3"), &mp3.planes);
     let snr = snr_db(&mp3.planes, &loops);
     assert!(snr > 20.0, "mp3 SNR against the source: {snr:.1} dB");
 }
@@ -327,6 +351,7 @@ fn pcm24_and_pcm32_keep_every_valid_bit() {
     let s32 = decode(&dir.join("sine-s32le.wav"));
     assert_eq!(s32.format, SampleFormat::I32, "s32 format");
     for (c, plane) in s32.planes.iter().enumerate() {
+        assert_eq!(plane.len(), source[c].len(), "s32 channel {c} length");
         for (i, (&got, &src)) in plane.iter().zip(&source[c]).enumerate() {
             assert_eq!(got, src, "s32 channel {c} frame {i}");
         }
@@ -335,6 +360,7 @@ fn pcm24_and_pcm32_keep_every_valid_bit() {
     let s24 = decode(&dir.join("sine-s24le.wav"));
     assert_eq!(s24.format, SampleFormat::I24, "s24 format");
     for (c, plane) in s24.planes.iter().enumerate() {
+        assert_eq!(plane.len(), source[c].len(), "s24 channel {c} length");
         for (i, (&got, &src)) in plane.iter().zip(&source[c]).enumerate() {
             assert_eq!(got, src >> 8, "s24 channel {c} frame {i}");
         }
