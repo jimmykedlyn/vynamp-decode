@@ -97,9 +97,10 @@ Spike de decoder registry, corpus básico e ADR-002 com versões/features propos
   mantenedor porque mexe no requisito aprovado, e um é fragilidade aceita com justificativa
 - [x] PR aberto com template preenchido; CI Gate verde no SHA final — PR
   [#27](https://github.com/jimmykedlyn/vynamp-decode/pull/27), base `develop`, template
-  preenchido; `CI Gate` verde em `292897d` com `fmt`, `clippy`, `test` e `machete` todos
-  `SUCCESS` e `mergeStateStatus` `CLEAN`. Este commit muda o SHA, e o Gate roda de novo
-  sobre ele; o que está registrado é o veredito medido, não uma promessa
+  preenchido. `CI Gate` medido em `f4df9be`, que é o commit **revisado e corrigido**: `fmt`,
+  `clippy`, `test` e `machete` todos `SUCCESS` e `mergeStateStatus` `CLEAN`. Qualquer
+  commit posterior muda o SHA e o Gate roda de novo sobre ele; o que está registrado é o
+  veredito medido, não uma promessa
 
 ## Notas de execução
 
