@@ -5,8 +5,8 @@
 | Módulo | `vynamp-decode` |
 | Crate(s) | 9: `vynamp-decode` (fachada), `vynamp-decode-core`, `-riff`, `-aiff`, `-pcm`, `-flac`, `-mpa`, `-mp3` e `vynamp-decode-testkit` (só teste) |
 | Tipo | lib |
-| Versão da spec | 0.2.0 |
-| Data | 2026-11-11 |
+| Versão da spec | 0.3.0 |
+| Data | 2026-11-12 |
 | Estado | **rascunho autorado, não aprovado** — §3, §4, §5, §6, §9 e §10 escritos a partir do código e dos testes que existem hoje; a aprovação é do mantenedor, por `GOVERNANCE.md` |
 | Dono | a definir |
 | Depende de | std; nenhuma dependência externa |
@@ -270,6 +270,10 @@ rede.
 | `DECODE-AC-25` | dois relatos de gapless que não fecham | a faixa é aberta | um `GaplessConflict` é relatado e a escolha é determinística | `the_reader_reports_conflicting_gapless_information` |
 | `DECODE-AC-26` | `Limits` com canal e frame apertados | o arquivo é aberto | devolve `Limit(Channels)` / `Limit(Frames)`, não `panic!` | `channel_limit`, `frame_limit` |
 | `DECODE-AC-27` | milhares de bytes corrompidos ao acaso | cada crate de decodificador os recebe | nenhum `panic!` | `garbage_never_panics`, `faulty_files_are_rejected_in_strict_mode` |
+| `DECODE-AC-28` | o corpus gapless do MPEG em `crates/vynamp-decode/tests/fixtures/mpeg/`, com `triangulation.sha256` | cada fixture é hasheada e a lista do manifesto é comparada com a do diretório | o sha256 de cada arquivo bate com o do manifesto, o manifesto não é subconjunto do diretório e um byte trocado sai do valor fixado | `every_gapless_fixture_has_its_hash_in_the_manifest`, `a_flipped_byte_leaves_the_pinned_hash` |
+| `DECODE-AC-29` | WAV PCM16, FLAC e MP3 derivados do mesmo tom de origem, e a referência do FLAC | cada um é decodificado | os dois lossless decodificam amostra a amostra para o tom de origem e são iguais entre si; o MP3 tem a duração certa e fica acima de 20 dB de SNR contra o mesmo tom | `wav_flac_and_mp3_of_the_same_tone_decode_against_one_reference` |
+| `DECODE-AC-30` | um WAV PCM24 e um WAV PCM32 tirados do mesmo tom | cada um é decodificado | o PCM32 é o tom e o PCM24 é o tom deslocado de 8 bits, com os 8 bits baixos vindos do sinal e não zerados | `pcm24_and_pcm32_keep_every_valid_bit` |
+| `DECODE-AC-31` | um FLAC lossless e um MP3 com tag LAME | a faixa é aberta e lida até o fim nos dois | o FLAC declara `delay`/`padding` zero e entrega `total_samples`; o MP3 declara os dois pela tag e entrega `frames − delay − padding` | `the_gapless_trim_is_declared_by_mpeg_and_absent_in_flac` |
 
 ### Critérios que esta spec **não** fixa
 
@@ -347,7 +351,7 @@ o **único** crate do workspace com exceção ao `unsafe_code = "forbid"`.
 
 ## 9. Testes e fixtures
 
-**505 `#[test]` em nove crates, todos rodando sem rede, sem hardware e sem FFmpeg no
+**510 `#[test]` em nove crates, todos rodando sem rede, sem hardware e sem FFmpeg no
 PATH.** O FFmpeg é ferramenta de geração das fixtures, nunca dependência de execução: as
 referências estão commitadas ao lado dos arquivos.
 
@@ -360,11 +364,15 @@ referências estão commitadas ao lado dos arquivos.
 | `tests/fixtures/flac/` | 23 arquivos gerados + `ref/` com o PCM de referência + `MANIFEST.txt` com SHA-256 por arquivo | autoral | comparação bit a bit contra a referência |
 | `tests/fixtures/mpeg/` | 67 arquivos cobrindo as tabelas de Layer II e os três modos de Layer III, com `MANIFEST.txt` e referência `.ref.f32` | autoral | erro RMS e máximo contra o critério de precisão total da ISO/IEC 11172-4 |
 | `tests/fixtures/pcm/` | 13 arquivos de layout (endianness, 8/16/24/32 bits, f32/f64, RF64, Wave64, AIFC, 6 canais) + `MANIFEST.txt` | autoral | sinal de origem reconstruído independentemente e hash fixado |
+| `crates/vynamp-decode/tests/fixtures/mpeg/` | 15 arquivos de gapless em cinco casos (`.src.wav`, `.mp3` com tag LAME e `.ref.f32` por caso) + `triangulation.sha256` | autoral | hash por arquivo conferido contra o manifesto, triangulação com o tom de origem e trim por tag LAME |
 
 As fixtures são geradas por `tools/fixtures/generate.ps1`,
 `generate-flac-dev.ps1` e `generate-mpeg-dev.ps1`. O `MANIFEST.txt` guarda, por arquivo,
 o hash, os argumentos de geração e a versão exata do gerador — sem isso uma fixture
-regenerada noutra versão viraria uma referência diferente sem ninguém notar.
+regenerada noutra versão viraria uma referência diferente sem ninguém notar. O corpus de
+gapless do MPEG tem o manifesto em `triangulation.sha256`, no formato `sha256sum`, escrito
+pelo próprio `generate-mpeg-dev.ps1`: ele nasceu sem manifesto e ganhou um em
+`TASK-E01-01`.
 
 ### Testes que dependem de corpus externo
 
@@ -407,3 +415,4 @@ Limitação declarada não reprova a entrega; limitação omitida reprova.
 | **Sem `Sync` no `Reader`** | Um leitor pertence a uma thread. Compartilhar exige um canal, não um `Mutex` em volta do `Reader` | Decisão: o decode é sequencial por natureza |
 | **`Mode::Resilient` recupera, mas não reconstrói** | Um frame corrompido vira silêncio do tamanho do frame ou é saltado; os bytes perdidos não voltam | `Event::CorruptFrame` é o relatório; a decisão é do chamador |
 | **Nenhum `application_ready`** | O módulo tem código e testes, não um aplicativo: nada aqui toca dispositivo de áudio | TASK-E02-01, no player |
+| **FLAC não tem delay nem padding.** O `STREAMINFO` do RFC 9639 §8.2 tem 34 bytes: `min_block`, `max_block`, `min_frame`, `max_frame`, `sample_rate`, `channels`, `bits_per_sample`, `total_samples` e `md5`. Não há campo de encoder delay nem de padding, e o codec é lossless, sem priming | Um FLAC nunca carrega `delay`/`padding` a cortar: `Track::delay` e `Track::padding` são sempre 0 neste container (`vynamp-decode-flac/src/demux.rs` os fixa assim), e a saída tem exatamente os `total_samples` do STREAMINFO. O caso real de trim de gapless no corpus é MPEG com tag LAME (delay 1105, padding 344–656 nas fixtures) | Registrado aqui porque o AC-2 da `TASK-E01-01` pede "um FLAC com encoder delay e padding declarados no streaminfo", condição que o formato não oferece. O trim por codec é `TASK-E17-02` |
