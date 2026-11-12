@@ -77,7 +77,26 @@ Spike de decoder registry, corpus básico e ADR-002 com versões/features propos
 
 ## DoD — pronto para review
 
-- [x] Todos os critérios de aceite com evidência — tabela de `## Notas de execução
+- [x] Todos os critérios de aceite com evidência — a tabela da seção de notas de execução
+  abaixo, uma linha por AC
+- [x] `cargo fmt --check` e `cargo clippy --all-targets -- -D warnings` limpos — em
+  2026-11-12, no workspace de `libs/decode`
+- [x] `cargo test` verde; testes ignorados listados com motivo — 513 verdes, 3 ignorados,
+  cada um com o motivo na própria anotação
+- [x] Spec do módulo atualizada se a implementação revelou algo novo — `specs/decode.md`
+  v0.3.0: §10 ganhou a limitação do STREAMINFO, §5 os critérios `DECODE-AC-28` a `-31` e
+  §9 o corpus de gapless com manifesto
+- [x] `backlog.json` com o estado correto — `implemented` no umbrella, no PR de repin que
+  segue o merge deste
+- [ ] Revisão feita por contexto limpo, não pelo implementador — **pendente:** quem
+  escreveu não revisa; a revisão é do subagente `revisor` sobre o diff, em contexto limpo
+- [x] PR aberto com template preenchido; CI Gate verde no SHA final — PR
+  [#27](https://github.com/jimmykedlyn/vynamp-decode/pull/27), base `develop`, template
+  preenchido; `CI Gate` verde em `292897d` com `fmt`, `clippy`, `test` e `machete` todos
+  `SUCCESS` e `mergeStateStatus` `CLEAN`. Este commit muda o SHA, e o Gate roda de novo
+  sobre ele; o que está registrado é o veredito medido, não uma promessa
+
+## Notas de execução
 
 Fechada em 2026-11-12. A evidência da suíte desta execução entra em
 `evidence/PR/task-e01-01/` no umbrella, pelo PR de repin que segue o merge deste — antes
