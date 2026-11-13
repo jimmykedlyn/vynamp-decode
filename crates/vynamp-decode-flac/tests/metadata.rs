@@ -358,10 +358,10 @@ fn truncated_metadata_is_eof() {
 
 /// `DECODE-AC-32` (a): a cut inside `STREAMINFO` is a typed error naming the cut offset.
 ///
-/// The header claims 34 bytes of `STREAMINFO`; the file has 40 bytes, so the cut leaves
-/// 6 body bytes — not enough for the 34-byte body, and not a container the probe can
-/// rescue. `offset` must be the cut, not the start of the block: the error is about
-/// where the data ran out.
+/// The stream is `fLaC` (4) + block header (4) + a 34-byte `STREAMINFO` body, so 42 bytes
+/// at minimum. Cutting at 40 leaves 32 of the 34 body bytes: the block header still
+/// promises 34, so the read runs out mid-body. `offset` must be the cut, not the start of
+/// the block — the error is about where the data ran out.
 #[test]
 fn truncated_streaminfo_is_a_typed_error() {
     let f = stream(&[block(0, true, &std_body())]);
