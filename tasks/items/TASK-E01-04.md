@@ -10,7 +10,7 @@
 | Módulo dono | `vynamp-decode` |
 | Repo | `jimmykedlyn/vynamp-decode` |
 | REQ coberto | `REQ-E01-04` |
-| Critérios da spec | `specs/decode.md` §5 (aprovada em 2026-11-13) — `DECODE-AC-01`, `-02`, `-03`, `-04`, `-10`, `-11`, `-13`, `-14`, `-15`, `-22`, `-23`, `-26`, `-32`, `-33`, conforme o mapa `DECODE-REQ-01/02/03/10/11/13/14/15/22/23` → `TASK-E01-04` da §4 |
+| Critérios da spec | `specs/decode.md` §5 (aprovada em 2026-11-13) — `DECODE-AC-01`, `-02`, `-03`, `-04`, `-10`, `-11`, `-13`, `-14`, `-15`, `-22`, `-23`, `-26`, `-32`, `-33`, conforme o mapa `DECODE-REQ-01/02/03/10/11/13/14/15/22/23` → `TASK-E01-04` da §4. Os outros dois arquivos de spec do módulo também declaram REQs desta TASK sem critério de aceite aprovado: `formatos.md` (10 REQs, `DECODE-REQ-36` a `-45`) e `registro-capacidades.md` (7, `DECODE-REQ-60` a `-68`). Nenhum deles entrou nesta execução, e nenhum foi lido como coberto |
 | Fase | M1 |
 | Prioridade | P1 |
 | Estado | planned |
