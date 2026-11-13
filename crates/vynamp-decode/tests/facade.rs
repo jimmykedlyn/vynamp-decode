@@ -936,22 +936,34 @@ fn registry_enumerates_names_extensions_and_verification() {
 ///
 /// The files are copied into a temporary directory with `std::env::temp_dir()` because the
 /// workspace has no registry packages in its `Cargo.lock` (ADR-002) and adding a crate for
-/// this would be the wrong trade. The name is unique per process to keep parallel runs apart.
+/// this would be the wrong trade. The name is unique per process to keep parallel runs apart,
+/// and `TempDir` removes it on drop — including when an assertion below fails, which a plain
+/// call at the end of the test would not do.
 #[test]
 fn renamed_files_probe_by_content_not_by_extension() {
     /// Fixture path, renamed file name, and the predicate its bytes must satisfy.
     type Case = (&'static str, &'static str, fn(&CodecId) -> bool);
 
+    /// Removes the directory when it goes out of scope, panic or not.
+    struct TempDir(std::path::PathBuf);
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures");
-    let dir = std::env::temp_dir().join(format!("vynamp-ac01-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("temp dir");
+    let dir = TempDir(std::env::temp_dir().join(format!("vynamp-ac01-{}", std::process::id())));
+    std::fs::create_dir_all(&dir.0).expect("temp dir");
 
     let cases: [Case; 3] = [
         ("flac/mono16.flac", "renamed-as-mp3.mp3", |c| {
             matches!(c, CodecId::Flac)
         }),
+        // Layer II exactly: the demuxer maps the layer field to the codec, so accepting
+        // any MPEG codec here would let a wrong layer pass.
         ("mpeg/l2-A-44k-mono-64k.mp2", "renamed-as-wav.wav", |c| {
-            matches!(c, CodecId::Mp2 | CodecId::Mp1 | CodecId::Mp3)
+            matches!(c, CodecId::Mp2)
         }),
         ("pcm/sine-s16le.wav", "renamed-as-flac.flac", |c| {
             matches!(c, CodecId::Pcm(_))
@@ -962,7 +974,7 @@ fn renamed_files_probe_by_content_not_by_extension() {
     for (source, renamed, want) in cases {
         let src = root.join(source);
         let data = std::fs::read(&src).unwrap_or_else(|e| panic!("{}: {e}", src.display()));
-        let path = dir.join(renamed);
+        let path = dir.0.join(renamed);
         std::fs::write(&path, &data).expect("write fixture copy");
 
         let opts = Options {
@@ -991,6 +1003,5 @@ fn renamed_files_probe_by_content_not_by_extension() {
         results.push((source, codec, total));
     }
 
-    std::fs::remove_dir_all(&dir).expect("clean temp dir");
     assert_eq!(results.len(), 3, "all three cases ran: {results:?}");
 }
