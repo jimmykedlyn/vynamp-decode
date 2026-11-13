@@ -239,6 +239,17 @@ fecham o mapa.
 > que **já existem**; **aprovado em 2026-11-13**, na abertura da `TASK-E01-04`, pelo
 > mantenedor. A aprovação vale pelo conteúdo desta tabela no commit que a registra — ela
 > não antecipa critério nenhum que venha a ser acrescentado depois.
+>
+> **Violação registrada, não corrigida (2026-11-13).** O commit `2227943`, o mesmo que
+> trouxe os testes da `TASK-E01-04`, também **acrescentou** `DECODE-AC-32` e `-33` e
+> **reescreveu** `DECODE-AC-01` (de dois casos, FLAC e MP3, para três, com MP2 e WAV). A
+> nota acima promete o contrário, e o `AGENTS.md` §4 exige que a spec mude antes do
+> código. O que aconteceu foi spec seguindo código: os critérios novos descrevem o que os
+> testes novos já provavam. Não há como desfazer isso sem reescrever história, então fica
+> registrado aqui, e a decisão que cabe ao mantenedor é **ratificar ou reverter** cada um
+> dos três. A reescrita do `AC-01` é a de maior risco: o critério aprovado era mais
+> fraco, e o texto novo é o que ficou valendo. Nenhum dos três foi aprovado por esta nota
+> — ela só conta o que houve.
 
 Cada linha nomeia um teste que roda hoje na suíte do módulo, sem hardware de áudio e sem
 rede.

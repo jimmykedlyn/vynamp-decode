@@ -857,10 +857,16 @@ fn builtin_formats_have_the_expected_verification_level() {
 
 /// `DECODE-AC-33`: the registry enumerates name, extensions and verification.
 ///
-/// The set has to follow the features, not a hardcoded four: a build with `--no-default-features`
-/// enumerates nothing, and one with a single feature enumerates exactly that. The profile
-/// column the `REQ-E01-04` acceptance used to ask for does not exist here by design — see
-/// `specs/decode.md` §10.
+/// The set has to follow the features, not a hardcoded four: a build without a feature
+/// does not enumerate it, and one with a single feature enumerates exactly that. The
+/// profile column the `REQ-E01-04` acceptance used to ask for does not exist here by
+/// design — see `specs/decode.md` §10.
+///
+/// Gated on the four container features because the extension guards below name a
+/// container each. Without the gate the test passes on the default build and fails on
+/// `--no-default-features --features riff`, which is the build the paragraph above claims
+/// to cover -- a documented property that no build exercises is a claim, not a test.
+#[cfg(all(feature = "riff", feature = "aiff", feature = "flac", feature = "mpa"))]
 #[test]
 fn registry_enumerates_names_extensions_and_verification() {
     let reg = default_registry();
@@ -902,6 +908,24 @@ fn registry_enumerates_names_extensions_and_verification() {
     );
     assert_eq!(codecs.iter().map(|c| c.0).collect::<Vec<_>>(), want_codecs);
 
+    // `DECODE-AC-33` names the verification level as part of the enumeration, so the third
+    // column has to be asserted here and not only by the test that checks the levels
+    // themselves -- otherwise it is data carried through the tuple and never read. The
+    // expected value per format is the one `specs/decode.md` §10 justifies, repeated here
+    // on purpose: the two tests agree through the spec, not through a shared helper, so a
+    // wrong level has to be written twice to pass.
+    let want = |name: &str| match name {
+        "flac" => Verification::Conformance,
+        "mpeg-audio-layer1" => Verification::Experimental,
+        _ => Verification::Oracle,
+    };
+    for (name, _, level) in &containers {
+        assert_eq!(*level, want(name), "container {name}");
+    }
+    for (name, level) in &codecs {
+        assert_eq!(*level, want(name), "codec {name}");
+    }
+
     // Extensions are part of what is enumerated, and are advertised without the dot.
     for (name, ext, _) in &containers {
         assert!(!ext.is_empty(), "{name} advertises no extension");
@@ -939,6 +963,11 @@ fn registry_enumerates_names_extensions_and_verification() {
 /// this would be the wrong trade. The name is unique per process to keep parallel runs apart,
 /// and `TempDir` removes it on drop — including when an assertion below fails, which a plain
 /// call at the end of the test would not do.
+///
+/// Gated on the three features the cases need: the fixtures are FLAC, MPEG audio and PCM,
+/// and a build without one of them fails at `open_path` with `unsupported: container`
+/// rather than proving anything about the extension.
+#[cfg(all(feature = "flac", feature = "mpa", feature = "pcm"))]
 #[test]
 fn renamed_files_probe_by_content_not_by_extension() {
     /// Fixture path, renamed file name, and the predicate its bytes must satisfy.
@@ -1003,5 +1032,15 @@ fn renamed_files_probe_by_content_not_by_extension() {
         results.push((source, codec, total));
     }
 
-    assert_eq!(results.len(), 3, "all three cases ran: {results:?}");
+    // The loop pushes one entry per case, so a length check here could never fail. What is
+    // worth asserting is that the three cases are the three distinct codecs the acceptance
+    // names: a copy-paste that made two cases the same file would still push three.
+    let got: Vec<&CodecId> = results.iter().map(|(_, c, _)| c).collect();
+    assert!(
+        matches!(
+            got.as_slice(),
+            [CodecId::Flac, CodecId::Mp2, CodecId::Pcm(_)]
+        ),
+        "the three cases must be three different codecs: {results:?}"
+    );
 }

@@ -362,11 +362,17 @@ fn truncated_metadata_is_eof() {
 /// at minimum. Cutting at 40 leaves 32 of the 34 body bytes: the block header still
 /// promises 34, so the read runs out mid-body. `offset` must be the cut, not the start of
 /// the block — the error is about where the data ran out.
+///
+/// The criterion says "o probe e o decode rodam sobre os dois", so the probe half is
+/// exercised too: `probe_flac` reads only the four-byte signature, which the cut leaves
+/// intact, so it still scores 100. That is the point — the probe is a cheap signature
+/// check and is not where a truncated body is caught; the typed error comes from `open`.
 #[test]
 fn truncated_streaminfo_is_a_typed_error() {
     let f = stream(&[block(0, true, &std_body())]);
     assert!(f.len() > 40, "fixture must have more than 40 bytes");
     let cut = 40;
+    assert_eq!(probe_flac(&f[..cut]), 100, "the signature survives the cut");
     assert_eq!(
         invalid(open(f[..cut].to_vec(), &Options::default())),
         ("unexpected eof", cut as u64)
@@ -403,7 +409,9 @@ fn declared_length_beyond_max_frames_is_a_typed_error() {
         open(f.clone(), &opts).err(),
         Some(Error::Limit(LimitKind::Frames))
     );
-    // Just under the limit opens: the boundary is the configured number, not the format's.
+    // Exactly at the limit opens: `Limits::check_frames` compares with `>`, so the boundary
+    // is inclusive and the configured number itself passes. The format's own limit -- 36
+    // bits of `total_samples` -- is far above this and never the one being measured.
     let ok = stream(&[block(
         0,
         true,

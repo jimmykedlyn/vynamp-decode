@@ -60,7 +60,7 @@ Adapters local source/probe/decode para WAV/AIFF/FLAC/MP3.
 | ID | Given | When | Then |
 |---|---|---|---|
 | `TASK-E01-04-AC-1` | um FLAC renomeado para .mp3 e um MP3 renomeado para .wav | o probe lê o cabeçalho sem consultar a extensão e o registry escolhe o decoder pelo conteúdo | Extensão incorreta permite sniff |
-| `TASK-E01-04-AC-2` | um arquivo truncado no meio do streaminfo e um cabeçalho que declara 2^31 frames, com o limite de tamanho configurado | o probe e o decode rodam sobre os dois arquivos | corrupt/oversized falham com erro tipado |
+| `TASK-E01-04-AC-2` | um arquivo truncado no meio do streaminfo e um cabeçalho que declara 2^(31)-1 frames, com o limite de tamanho configurado | o probe e o decode rodam sobre os dois arquivos | corrupt/oversized falham com erro tipado |
 | `TASK-E01-04-AC-3` | a build com as features de decoder fixadas no ADR-002 ativas | a API do registry enumera os containers e codecs que as features ligaram | decoder lista os formatos que abrem com nome, extensões e nível de verificação. |
 
 > **AC-3 corrigido em 2026-11-13**, pelo mantenedor, na abertura da execução. O `Then`
@@ -129,3 +129,35 @@ limitar e nada foi implementado. A linha da §10 foi reescrita para dizer isso e
 TASK dependia já existe e está verde; E01-03 é a state machine do `engine`, que não toca
 este repositório. A ordem do backlog foi tratada como ordenação, não como bloqueio de
 código, e isso está registrado no corpo do PR.
+
+### 2026-11-13 — revisão em contexto limpo, e o que ela achou
+
+**A revisão aconteceu, na quinta tentativa.** As quatro primeiras foram interrompidas por
+mim com base num sinal inválido: eu lia o arquivo de saída do subagente e tratava 0 byte
+como travamento. Todos os subagentes desta sessão gravam 0 byte ali, inclusive os que
+funcionaram — a métrica não media nada. O registro anterior, que dizia "o revisor falhou
+sem devolver saída", estava errado nessa parte: o que houve foi interrupção indevida. A
+revisão que valeu foi feita por um agente `general-purpose` com prompt enxuto, e devolveu
+**APROVADO COM RESSALVAS** com sete achados.
+
+**Fronteira limpa.** Nenhum tipo de domínio atravessou, nenhuma dependência `vynamp-*`
+nova, nenhum `unsafe`, nenhum `unwrap` em caminho de produção. As quatro mutações da
+tabela acima foram conferidas uma a uma contra o código e cada uma atinge exatamente o
+caminho que o teste discrimina.
+
+**Corrigidos neste PR:**
+
+| Achado | Correção |
+|---|---|
+| Os dois testes novos só passavam com as features default, e a doc comment afirmava o contrário | `#[cfg(all(...))]` nos dois, com o motivo escrito; a build `--no-default-features --features riff` agora passa (antes falhava em `ext_of("flac")`) |
+| `verification` era coletado no tuple e nunca asserido, embora o `DECODE-AC-33` o nomeie | asserido contra o mapa por formato, repetido de propósito em vez de compartilhar helper |
+| `assert_eq!(results.len(), 3)` era tautológico — o loop sempre empurra três | trocado por asserção de que os três codecs são distintos e os que o AC nomeia |
+| O comentário dizia "just under the limit" para um valor exatamente no limite | corrigido: `check_frames` usa `>`, então a fronteira é inclusiva |
+| O AC-2 da TASK dizia "2^31 frames"; a spec e o teste usam 2³¹−1 | texto da TASK alinhado |
+| O `DECODE-AC-32` diz "o probe e o decode rodam", mas só `open_flac` era chamado | `probe_flac` passou a ser exercitado, com o motivo de ele sobreviver ao corte |
+
+**Registrado e não corrigido — decisão do mantenedor.** O commit `2227943` acrescentou
+`DECODE-AC-32` e `-33` e reescreveu `DECODE-AC-01` no mesmo commit dos testes. Isso
+contradiz a nota de aprovação da §5 e o `AGENTS.md` §4 ("a spec muda antes do código,
+nunca depois"). Não há como desfazer sem reescrever história; a violação está registrada
+na própria §5, e cabe ao mantenedor ratificar ou reverter cada um dos três critérios.
