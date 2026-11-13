@@ -10,7 +10,7 @@
 | Módulo dono | `vynamp-decode` |
 | Repo | `jimmykedlyn/vynamp-decode` |
 | REQ coberto | `REQ-E01-04` |
-| Critérios da spec | pendente — `specs/decode.md` §5 |
+| Critérios da spec | `specs/decode.md` §5 (aprovada em 2026-11-13) — `DECODE-AC-01`, `-02`, `-03`, `-04`, `-10`, `-11`, `-13`, `-14`, `-15`, `-22`, `-23`, `-26`, `-32`, `-33`, conforme o mapa `DECODE-REQ-01/02/03/10/11/13/14/15/22/23` → `TASK-E01-04` da §4 |
 | Fase | M1 |
 | Prioridade | P1 |
 | Estado | planned |
@@ -63,12 +63,21 @@ Adapters local source/probe/decode para WAV/AIFF/FLAC/MP3.
 | `TASK-E01-04-AC-2` | um arquivo truncado no meio do streaminfo e um cabeçalho que declara 2^31 frames, com o limite de tamanho configurado | o probe e o decode rodam sobre os dois arquivos | corrupt/oversized falham com erro tipado |
 | `TASK-E01-04-AC-3` | a build com as features de decoder fixadas no ADR-002 ativas | a API do registry enumera formatos, perfis e taxas suportados | decoder lista perfis reais. |
 
+> **AC-3 corrigido em 2026-11-13**, pelo mantenedor, na abertura da execução. O `Then`
+> aprovado no backlog dizia "decoder lista perfis reais", e a Boundary desta mesma TASK
+> proíbe perfis por formato: nem `ContainerDescriptor` nem `CodecDescriptor` têm campo de
+> perfil ou de taxa. Perfil é tuple de runtime — `DECODE-REQ-70`, dona `TASK-E17-01`. O
+> `Then` executado passou a ser **"decoder lista nome, extensões e verificação
+> suportados"**, provado por `registry_enumerates_names_extensions_and_verification`
+> (`DECODE-AC-33`). O `acceptance` do `REQ-E01-04` no umbrella foi corrigido no mesmo
+> commit, no PR de repin.
+
 ## Verificação
 
 | Item | Comando / fixture | Evidência esperada |
 |---|---|---|
-| Teste automatizado | `cargo test --workspace --locked` em `libs/decode`, mais `cargo test -p vynamp-decode --test facade --locked` e `cargo run --example support_matrix` | **medido em 2026-11-10**: 508 verdes, 3 ignorados, 0 falhas em 47 suítes; a suíte `facade` dá 27 verdes, incluindo `probe_tie_resolved_by_extension`, `probe_nothing_matches` e `random_bytes_are_unsupported`. O `support_matrix` imprime 4 containers (riff, aiff, flac, mpa) e 4 codecs (pcm, flac, mpeg-audio, mpeg-audio-layer1) |
-| Oráculo independente | `cargo test -p vynamp-decode --test oracle_flac --test oracle_pcm --test oracle_mpeg --locked` sobre `tests/fixtures/{flac,pcm,mpeg}/MANIFEST.txt` (sha256 por arquivo), mais os testes de probe por conteúdo: `probe_rejects_others` em `crates/vynamp-decode-riff/tests/riff.rs:146` e `crates/vynamp-decode-aiff/tests/aiff.rs:313` | **medido**: um FLAC gravado como `.mp3` abre com `codec=Flac`, um MP2 gravado como `.wav` abre com `codec=Mp2` e um WAV gravado como `.flac` abre com `Pcm(Signed, 16 bits)`, os três em `Mode::Strict` e decodificando até o fim — a extensão não decide nada. FLAC truncado em 40 bytes dá `Invalid { what: "unexpected eof", offset: 40 }`; `STREAMINFO` declarando 2^31-1 frames com `max_frames: 1_000_000` dá `Limit(Frames)`. **Ausência medida**: nem `ContainerDescriptor` nem `CodecDescriptor` têm campo de perfis ou de taxas, então a enumeração do AC-3 sai com nome, extensões e nível de verificação — não com perfis |
+| Teste automatizado | `cargo test --workspace --locked` em `libs/decode`, mais `cargo test -p vynamp-decode --test facade --locked` e `cargo run --example support_matrix` | **medido em 2026-11-13**: 517 verdes, 3 ignorados, 0 falhas em 48 suítes (baseline da abertura: 513/48). A suíte `facade` dá 29 verdes, incluindo `renamed_files_probe_by_content_not_by_extension` e `registry_enumerates_names_extensions_and_verification`. O `support_matrix` imprime 4 containers (riff, aiff, flac, mpa) e 4 codecs (pcm, flac, mpeg-audio, mpeg-audio-layer1) |
+| Oráculo independente | `cargo test -p vynamp-decode --test oracle_flac --test oracle_pcm --test oracle_mpeg --locked` sobre `tests/fixtures/{flac,pcm,mpeg}/MANIFEST.txt` (sha256 por arquivo), mais os testes de probe por conteúdo: `probe_rejects_others` em `crates/vynamp-decode-riff/tests/riff.rs:146` e `crates/vynamp-decode-aiff/tests/aiff.rs:313` | **medido em 2026-11-13, por teste que falha quando a implementação mente**: o FLAC gravado como `.mp3`, o MP2 gravado como `.wav` e o WAV gravado como `.flac` são agora arquivos reais em diretório temporário, e cada um abre com o codec do seu conteúdo e decodifica até o fim em `Mode::Strict`. FLAC cortado em 40 bytes dá `("unexpected eof", 40)`; `STREAMINFO` declarando 2³¹−1 frames com `max_frames: 1_000_000` dá `Limit(Frames)`, e o mesmo arquivo com 1 000 000 declarados abre. **Ausência medida**: nem `ContainerDescriptor` nem `CodecDescriptor` têm campo de perfis ou de taxas — a enumeração do AC-3 sai com nome, extensões e verificação, e a ausência está registrada na §10 da spec |
 | Hardware | nenhum: o probe lê cabeçalho e o decode compara contra fixtures versionadas; não há dispositivo de áudio em nenhum caminho | ausência é limitação registrada, não aprovação |
 
 ## DoD — pronto para review
@@ -83,3 +92,39 @@ Adapters local source/probe/decode para WAV/AIFF/FLAC/MP3.
 ## Notas de execução
 
 Preenchido durante a execução, não antes.
+
+### 2026-11-13 — execução
+
+**O que já existia.** Os adapters de WAV/AIFF/FLAC/MP3 já estavam registrados em
+`crates/vynamp-decode/src/lib.rs` e o registry já estava implementado. O produto desta
+TASK não foi código de decode novo: foi **prova**, mais a correção do AC-3. O baseline
+medido na abertura foi 513 verdes em 48 suítes, com os três comportamentos dos ACs já
+funcionando — mas **sem teste que os discriminasse** nos pontos que o AC pede.
+
+**Por que a prova de vermelho foi por mutação.** Os testes cobrem comportamento que já
+funcionava, então não há vermelho natural. Cada teste novo foi validado quebrando a
+implementação de propósito e conferindo que ele falha, com a mutação revertida no mesmo
+commit:
+
+| Teste | Mutação aplicada | Resultado |
+|---|---|---|
+| `declared_length_beyond_max_frames_is_a_typed_error` | removido `opts.limits.check_frames(f)` em `flac/src/demux.rs` | falhou com `left: None, right: Some(Limit(Frames))` |
+| `truncated_streaminfo_is_a_typed_error` | `ByteReader::eof` passou a reportar `offset: 0` | falhou com `left: ("unexpected eof", 0), right: ("unexpected eof", 40)` |
+| `renamed_files_probe_by_content_not_by_extension` | `Registry::probe` passou a devolver o descritor pela extensão antes do score | falhou com `invalid mpeg sync at offset 0` no FLAC renomeado para `.mp3` |
+| `registry_enumerates_names_extensions_and_verification` | removido o registro de `MPEG_AUDIO_LAYER1_CODEC` | falhou com a lista de codecs sem `mpeg-audio-layer1` |
+
+**Decisão de fixture.** O teste do AC-1 precisa de arquivo renomeado no disco. O
+workspace tem **0 pacotes de registry** no `Cargo.lock` (propriedade medida no ADR-002),
+então `tempfile` não entrou como dev-dependency: o diretório é montado com
+`std::env::temp_dir()` e o nome leva o PID, para duas execuções em paralelo não colidirem.
+
+**Limitação reavaliada.** `Limits::max_depth` não é aplicado por nenhum demuxer, e a §10
+apontava esta TASK como dona. Os quatro containers desta TASK são planos (RIFF, AIFF,
+FLAC, MPEG audio não têm container dentro de container), então não há profundidade a
+limitar e nada foi implementado. A linha da §10 foi reescrita para dizer isso e apontar
+`TASK-E17-03`/`TASK-E01-07` como donas reais.
+
+**Dependência.** O backlog ordena `TASK-E01-03` antes desta. O `registry.rs` de que esta
+TASK dependia já existe e está verde; E01-03 é a state machine do `engine`, que não toca
+este repositório. A ordem do backlog foi tratada como ordenação, não como bloqueio de
+código, e isso está registrado no corpo do PR.

@@ -356,6 +356,62 @@ fn truncated_metadata_is_eof() {
     }
 }
 
+/// `DECODE-AC-32` (a): a cut inside `STREAMINFO` is a typed error naming the cut offset.
+///
+/// The header claims 34 bytes of `STREAMINFO`; the file has 40 bytes, so the cut leaves
+/// 6 body bytes — not enough for the 34-byte body, and not a container the probe can
+/// rescue. `offset` must be the cut, not the start of the block: the error is about
+/// where the data ran out.
+#[test]
+fn truncated_streaminfo_is_a_typed_error() {
+    let f = stream(&[block(0, true, &std_body())]);
+    assert!(f.len() > 40, "fixture must have more than 40 bytes");
+    let cut = 40;
+    assert_eq!(
+        invalid(open(f[..cut].to_vec(), &Options::default())),
+        ("unexpected eof", cut as u64)
+    );
+    // The same cut in Resilient mode is still an open-time error: there is no stream to
+    // recover into, so resilience cannot invent a length.
+    assert_eq!(
+        invalid(open(f[..cut].to_vec(), &resilient())).0,
+        "unexpected eof"
+    );
+}
+
+/// `DECODE-AC-32` (b): a declared length beyond `max_frames` fails at open, as a limit.
+///
+/// `STREAMINFO` carries 36 bits of `total_samples`, so 2³¹−1 is a legal value the format
+/// can express and an absurd one to accept: the check must come from `Limits`, not from
+/// the bit width.
+#[test]
+fn declared_length_beyond_max_frames_is_a_typed_error() {
+    let declared: u64 = (1u64 << 31) - 1;
+    let f = stream(&[block(
+        0,
+        true,
+        &si_body(4096, 4096, 44_100, 2, 16, declared),
+    )]);
+    let opts = Options {
+        limits: Limits {
+            max_frames: 1_000_000,
+            ..Limits::default()
+        },
+        ..Options::default()
+    };
+    assert_eq!(
+        open(f.clone(), &opts).err(),
+        Some(Error::Limit(LimitKind::Frames))
+    );
+    // Just under the limit opens: the boundary is the configured number, not the format's.
+    let ok = stream(&[block(
+        0,
+        true,
+        &si_body(4096, 4096, 44_100, 2, 16, 1_000_000),
+    )]);
+    assert!(open(ok, &opts).is_ok());
+}
+
 #[test]
 fn byte_flip_and_truncation_smoke() {
     let file = stream(&[
