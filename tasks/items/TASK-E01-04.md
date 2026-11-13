@@ -61,16 +61,17 @@ Adapters local source/probe/decode para WAV/AIFF/FLAC/MP3.
 |---|---|---|---|
 | `TASK-E01-04-AC-1` | um FLAC renomeado para .mp3 e um MP3 renomeado para .wav | o probe lê o cabeçalho sem consultar a extensão e o registry escolhe o decoder pelo conteúdo | Extensão incorreta permite sniff |
 | `TASK-E01-04-AC-2` | um arquivo truncado no meio do streaminfo e um cabeçalho que declara 2^31 frames, com o limite de tamanho configurado | o probe e o decode rodam sobre os dois arquivos | corrupt/oversized falham com erro tipado |
-| `TASK-E01-04-AC-3` | a build com as features de decoder fixadas no ADR-002 ativas | a API do registry enumera formatos, perfis e taxas suportados | decoder lista perfis reais. |
+| `TASK-E01-04-AC-3` | a build com as features de decoder fixadas no ADR-002 ativas | a API do registry enumera os containers e codecs que as features ligaram | decoder lista os formatos que abrem com nome, extensões e nível de verificação. |
 
 > **AC-3 corrigido em 2026-11-13**, pelo mantenedor, na abertura da execução. O `Then`
-> aprovado no backlog dizia "decoder lista perfis reais", e a Boundary desta mesma TASK
-> proíbe perfis por formato: nem `ContainerDescriptor` nem `CodecDescriptor` têm campo de
-> perfil ou de taxa. Perfil é tuple de runtime — `DECODE-REQ-70`, dona `TASK-E17-01`. O
-> `Then` executado passou a ser **"decoder lista nome, extensões e verificação
-> suportados"**, provado por `registry_enumerates_names_extensions_and_verification`
-> (`DECODE-AC-33`). O `acceptance` do `REQ-E01-04` no umbrella foi corrigido no mesmo
-> commit, no PR de repin.
+> aprovado dizia "decoder lista perfis reais", e a Boundary desta mesma TASK proíbe perfis
+> por formato: nem `ContainerDescriptor` nem `CodecDescriptor` têm campo de perfil ou de
+> taxa. Perfil é tuple de runtime — `DECODE-REQ-70`, dona `TASK-E17-01`. O `Then` passou a
+> ser **"decoder lista os formatos que abrem com nome, extensões e nível de verificação"**,
+> provado por `registry_enumerates_names_extensions_and_verification` (`DECODE-AC-33`).
+> O texto foi corrigido nos três lugares que o gate compara — `tasks/backlog.json`,
+> `product/03-requisitos.md` e esta tabela — no PR de repin do umbrella, porque
+> `cargo xtask check-tasks` exige que cada cláusula do `acceptance` apareça aqui.
 
 ## Verificação
 
