@@ -5,9 +5,9 @@
 | Módulo | `vynamp-decode` |
 | Crate(s) | 9: `vynamp-decode` (fachada), `vynamp-decode-core`, `-riff`, `-aiff`, `-pcm`, `-flac`, `-mpa`, `-mp3` e `vynamp-decode-testkit` (só teste) |
 | Tipo | lib |
-| Versão da spec | 0.3.0 |
-| Data | 2026-11-12 |
-| Estado | **rascunho autorado, não aprovado** — §3, §4, §5, §6, §9 e §10 escritos a partir do código e dos testes que existem hoje; a aprovação é do mantenedor, por `GOVERNANCE.md` |
+| Versão da spec | 0.4.0 |
+| Data | 2026-11-13 |
+| Estado | **§5 aprovada em 2026-11-13** pelo mantenedor, na abertura da `TASK-E01-04`. As demais seções seguem rascunho autorado a partir do código e dos testes que existem hoje: §3, §4, §6, §9 e §10 não foram aprovadas e não devem ser lidas como contrato. A aprovação é do mantenedor, por `GOVERNANCE.md` |
 | Dono | a definir |
 | Depende de | std; nenhuma dependência externa |
 | É dependido por | engine; encode (para transcodificar sem segundo parser) |
@@ -203,9 +203,9 @@ Um requisito por comportamento que o código precisa manter, com ID estável. O 
 
 | ID | Requisito | REQ de produto | TASK | Onde é provado |
 |---|---|---|---|---|
-| `DECODE-REQ-01` | O formato é escolhido pelo conteúdo; a extensão só desempata | `REQ-E01-04` | TASK-E01-04 | `probe_tie_resolved_by_extension`, `open_path_uses_the_extension_and_probe` |
+| `DECODE-REQ-01` | O formato é escolhido pelo conteúdo; a extensão só desempata | `REQ-E01-04` | TASK-E01-04 | `renamed_files_probe_by_content_not_by_extension`, `probe_tie_resolved_by_extension`, `open_path_uses_the_extension_and_probe` |
 | `DECODE-REQ-02` | Entrada que não casa com nenhum container falha com `Unsupported("container")` e sem `panic!` | `REQ-E01-04` | TASK-E01-04 | `random_bytes_are_unsupported`, `probe_nothing_matches` |
-| `DECODE-REQ-03` | Cada codec é resolvido pelo `CodecId` da faixa, e a lista de formatos acompanha as features ligadas | `REQ-E01-04` | TASK-E01-04 | `codec_lookup` |
+| `DECODE-REQ-03` | Cada codec é resolvido pelo `CodecId` da faixa, e a lista de formatos acompanha as features ligadas | `REQ-E01-04` | TASK-E01-04 | `codec_lookup`, `registry_enumerates_names_extensions_and_verification` |
 | `DECODE-REQ-04` | A saída é trimada: `delay` descartado no início e `padding` no fim, atravessando pacotes | `REQ-E01-01` | TASK-E01-01 | `gapless_delay_and_padding_span_packets`, `lame_tagged_files_decode_to_exactly_the_encoded_pcm_length` |
 | `DECODE-REQ-05` | `frames()` e `position()` contam a timeline trimada, não a do arquivo | `REQ-E01-01` | TASK-E01-01 | `frames_and_position_follow_the_trimmed_timeline` |
 | `DECODE-REQ-06` | O comprimento só é imposto quando a faixa declara `padding`; uma declaração seca é limite inferior | `REQ-E01-01` | TASK-E01-01 | `resilient_delivers_samples_beyond_a_too_small_declared_total`, `declared_1000_present_400_strict` |
@@ -213,9 +213,9 @@ Um requisito por comportamento que o código precisa manter, com ID estável. O 
 | `DECODE-REQ-08` | Um pacote que decodifica menos frames que cobre não desloca os seguintes | `REQ-E01-01` | TASK-E01-01 | `short_decoder_output_does_not_shift_later_packets` |
 | `DECODE-REQ-09` | Fim de fluxo é `Ok(false)` com buffer vazio; não existe variante de erro para EOF | `REQ-E01-01` | TASK-E01-01 | `read_leaves_no_stale_frames_at_end` |
 | `DECODE-REQ-10` | Erro é dado: `Error` é `Copy`-comparável, `Display` e `std::error::Error` | `REQ-E01-04` | TASK-E01-04 | `wrong_size_error_carries_packet_offset`, `invalid_what` |
-| `DECODE-REQ-11` | Cada limite declarado em `Limits` que o formato usa é aplicado e devolve `Limit(kind)` | `REQ-E01-04` | TASK-E01-04 | `channel_limit`, `frame_limit`, `limits`, `frame_limit_is_enforced` |
+| `DECODE-REQ-11` | Cada limite declarado em `Limits` que o formato usa é aplicado e devolve `Limit(kind)` | `REQ-E01-04` | TASK-E01-04 | `channel_limit`, `frame_limit`, `limits`, `frame_limit_is_enforced`, `declared_length_beyond_max_frames_is_a_typed_error` |
 | `DECODE-REQ-12` | Cancelamento é consultado antes de cada pacote e devolve `Cancelled` | `REQ-E01-04` | TASK-E01-18 | `cancel_is_checked_before_each_packet`, `cancel_between_packets` |
-| `DECODE-REQ-13` | `Mode::Strict` falha no primeiro defeito; `Mode::Resilient` recupera e relata em `Event` | `REQ-E01-04` | TASK-E01-04 | `truncated_strict_and_resilient`, `resilient_corrupt_middle_frame_keeps_length_and_reports_once` |
+| `DECODE-REQ-13` | `Mode::Strict` falha no primeiro defeito; `Mode::Resilient` recupera e relata em `Event` | `REQ-E01-04` | TASK-E01-04 | `truncated_strict_and_resilient`, `resilient_corrupt_middle_frame_keeps_length_and_reports_once`, `truncated_streaminfo_is_a_typed_error` |
 | `DECODE-REQ-14` | A fila de eventos é limitada e o excedente é contado, não perdido em silêncio | `REQ-E01-04` | TASK-E01-04 | `event_queue_is_capped_and_counts_drops`, `demuxer_queue_drops_are_counted_by_the_reader` |
 | `DECODE-REQ-15` | Eventos são drenados também no fim do fluxo e no erro | `REQ-E01-04` | TASK-E01-04 | `events_are_drained_at_end_of_stream_and_on_error` |
 | `DECODE-REQ-16` | Cada formato declara seu nível de verificação, e o nível é o que os testes sustentam | `REQ-E17-01` | TASK-E17-01 | `builtin_formats_have_the_expected_verification_level` |
@@ -236,14 +236,16 @@ fecham o mapa.
 ## 5. Critérios de aceite
 
 > Autorado em 2026-11-11 a partir dos critérios que as TASKs **já tinham** e dos testes
-> que **já existem**. **Não aprovado:** quem aprova esta seção é o mantenedor.
+> que **já existem**; **aprovado em 2026-11-13**, na abertura da `TASK-E01-04`, pelo
+> mantenedor. A aprovação vale pelo conteúdo desta tabela no commit que a registra — ela
+> não antecipa critério nenhum que venha a ser acrescentado depois.
 
 Cada linha nomeia um teste que roda hoje na suíte do módulo, sem hardware de áudio e sem
 rede.
 
 | ID | Given | When | Then | Teste |
 |---|---|---|---|---|
-| `DECODE-AC-01` | um FLAC renomeado para `.mp3` e um MP3 renomeado para `.wav` | o probe lê o cabeçalho sem consultar a extensão | o container correto é escolhido em ambos | `probe_tie_resolved_by_extension`, `open_path_uses_the_extension_and_probe` |
+| `DECODE-AC-01` | um FLAC renomeado para `.mp3`, um MP2 renomeado para `.wav` e um WAV renomeado para `.flac`, cada um como arquivo no disco | o probe lê o cabeçalho sem consultar a extensão | o container e o codec corretos são escolhidos nos três, e os três decodificam até o fim em `Mode::Strict` | `renamed_files_probe_by_content_not_by_extension`, `probe_tie_resolved_by_extension`, `open_path_uses_the_extension_and_probe` |
 | `DECODE-AC-02` | bytes aleatórios sem container conhecido | `open` é chamado | devolve `Unsupported("container")`, sem `panic!` | `random_bytes_are_unsupported` |
 | `DECODE-AC-03` | um registry vazio | `probe` roda | devolve `Unsupported("container")` e a fonte volta à posição 0 | `probe_nothing_matches` |
 | `DECODE-AC-04` | o registro padrão | a lista de containers e codecs é consultada | o conjunto bate exatamente com as features ligadas | `codec_lookup` |
@@ -274,6 +276,8 @@ rede.
 | `DECODE-AC-29` | WAV PCM16, FLAC e MP3 derivados do mesmo tom de origem, e a referência do FLAC | cada um é decodificado | os dois lossless decodificam amostra a amostra para o tom de origem e são iguais entre si; o MP3 tem a duração certa e fica acima de 20 dB de SNR contra o mesmo tom | `wav_flac_and_mp3_of_the_same_tone_decode_against_one_reference` |
 | `DECODE-AC-30` | um WAV PCM24 e um WAV PCM32 tirados do mesmo tom | cada um é decodificado | o PCM32 é o tom e o PCM24 é o tom deslocado de 8 bits, com os 8 bits baixos vindos do sinal e não zerados | `pcm24_and_pcm32_keep_every_valid_bit` |
 | `DECODE-AC-31` | um FLAC lossless e um MP3 com tag LAME | a faixa é aberta e lida até o fim nos dois | o FLAC declara `delay`/`padding` zero e entrega `total_samples`; o MP3 declara os dois pela tag e entrega `frames − delay − padding` | `the_gapless_trim_is_declared_by_mpeg_and_absent_in_flac` |
+| `DECODE-AC-32` | um FLAC cortado no meio do bloco `STREAMINFO`, e um `STREAMINFO` que declara 2³¹−1 frames com `max_frames` em 1 000 000 | o probe e o decode rodam sobre os dois | o truncado devolve `Invalid { what: "unexpected eof" }` no offset do corte e o declarado devolve `Limit(Frames)`; nenhum dos dois entra em `panic!` | `truncated_streaminfo_is_a_typed_error`, `declared_length_beyond_max_frames_is_a_typed_error` |
+| `DECODE-AC-33` | o registro padrão | a enumeração de containers e codecs é consultada | sai com nome, extensões e nível de verificação, e o conjunto bate exatamente com as features ligadas | `registry_enumerates_names_extensions_and_verification` |
 
 ### Critérios que esta spec **não** fixa
 
@@ -406,7 +410,8 @@ Limitação declarada não reprova a entrega; limitação omitida reprova.
 |---|---|---|
 | **Quatro containers e quatro codecs.** RIFF/RF64/BW64/Wave64, AIFF/AIFC, FLAC, MPEG audio; PCM e FLAC e MP2/MP3/MP1 | Nada de Ogg, MP4, Matroska, WMA, WavPack, APE, DSD, AAC. Um `.m4a` cai em `Unsupported("container")` | TASK-E01-07 (codecs modernos), E01-08 (desktop e arquivos grandes), E01-09 (DSD), E17-02..17 (bindings) |
 | **Nenhuma feature `resample`.** O §2 permite `vynamp-dsp` atrás dela, e ela não existe | O decode nunca reamostra: o consumidor recebe a taxa do arquivo. Quem precisa converter chama o `vynamp-dsp` | TASK-E03-01, no engine |
-| **`Limits::max_depth` não é aplicado por nenhum demuxer** | Um container com aninhamento profundo não é recusado por profundidade; o limite existe no tipo e não protege nada | TASK-E01-04, quando um container aninhado entrar |
+| **`Limits::max_depth` não é aplicado por nenhum demuxer** | Um container com aninhamento profundo não é recusado por profundidade; o limite existe no tipo e não protege nada | Reavaliado na `TASK-E01-04` (2026-11-13): RIFF, AIFF, FLAC e MPEG audio são containers planos — nenhum deles tem container dentro de container, então não há profundidade a limitar nesta TASK e nada foi implementado. A limitação continua aberta, e o dono é a primeira TASK que trouxer container aninhado: `TASK-E17-03` (bindings de container) ou `TASK-E01-07` |
+| **Nenhum perfil no descritor.** `ContainerDescriptor` e `CodecDescriptor` têm `name`, `extensions` e `verification`; não têm `profiles`, nem lista de sample rates, nem limites | Quem enumera o registro sabe **o que abre**, não **em que perfil**: um decoder que aceita MP3 não anuncia "MPEG-1 Layer III 44,1 kHz estéreo até 320 kbps". A enumeração de `DECODE-AC-33` sai com nome, extensões e nível de verificação — não com perfis | `DECODE-REQ-70` / `TASK-E17-01`, que é a dona da capability por tuple. O `acceptance` do `REQ-E01-04` no umbrella dizia "decoder lista perfis reais": esse texto foi corrigido em 2026-11-13 para o que o registro entrega, porque perfil é tuple de runtime e não cabe no descritor. Consultar `config/format-catalog.json` em execução está proibido por `specs/registro-capacidades.md` |
 | **`channel_mask` só é preenchido pelo RIFF** (WAVE `EXTENSIBLE`). AIFF, FLAC e MPEG devolvem 0 | Layout de canais além de mono/estéreo não é descrito para FLAC 5.1, que é suportado mas chega sem máscara | TASK-E01-09 |
 | **Uma trilha só.** `open`/`open_path` decodificam a trilha 0 | Um `.mka`/`.mp4` com duas faixas de áudio não pode escolher a segunda — e esses containers nem abrem ainda | TASK-E17-03 |
 | **Sem metadados, CUE nem capas** (`C12`: a spec anunciou, o crate não existe) | Não há API para ler título, artista ou capítulo. O FLAC lê os blocos de metadados do stream, mas só o que precisa para decodificar | Fica registrado como limitação; é `§7` |

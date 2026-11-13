@@ -854,3 +854,154 @@ fn builtin_formats_have_the_expected_verification_level() {
     assert!(reg.containers().all(|c| c.verification == want(c.name)));
     assert!(reg.codecs().all(|c| c.verification == want(c.name)));
 }
+
+/// `DECODE-AC-33`: the registry enumerates name, extensions and verification.
+///
+/// The set has to follow the features, not a hardcoded four: a build with `--no-default-features`
+/// enumerates nothing, and one with a single feature enumerates exactly that. The profile
+/// column the `REQ-E01-04` acceptance used to ask for does not exist here by design — see
+/// `specs/decode.md` §10.
+#[test]
+fn registry_enumerates_names_extensions_and_verification() {
+    let reg = default_registry();
+    let containers: Vec<(&str, &[&str], Verification)> = reg
+        .containers()
+        .map(|c| (c.name, c.extensions, c.verification))
+        .collect();
+    let codecs: Vec<(&str, Verification)> =
+        reg.codecs().map(|c| (c.name, c.verification)).collect();
+
+    let mut want_containers: Vec<&str> = Vec::new();
+    if cfg!(feature = "riff") {
+        want_containers.push("riff");
+    }
+    if cfg!(feature = "aiff") {
+        want_containers.push("aiff");
+    }
+    if cfg!(feature = "flac") {
+        want_containers.push("flac");
+    }
+    if cfg!(feature = "mpa") {
+        want_containers.push("mpa");
+    }
+    let mut want_codecs: Vec<&str> = Vec::new();
+    if cfg!(feature = "pcm") {
+        want_codecs.push("pcm");
+    }
+    if cfg!(feature = "flac") {
+        want_codecs.push("flac");
+    }
+    if cfg!(feature = "mp3") {
+        want_codecs.push("mpeg-audio");
+        want_codecs.push("mpeg-audio-layer1");
+    }
+
+    assert_eq!(
+        containers.iter().map(|c| c.0).collect::<Vec<_>>(),
+        want_containers
+    );
+    assert_eq!(codecs.iter().map(|c| c.0).collect::<Vec<_>>(), want_codecs);
+
+    // Extensions are part of what is enumerated, and are advertised without the dot.
+    for (name, ext, _) in &containers {
+        assert!(!ext.is_empty(), "{name} advertises no extension");
+        for e in *ext {
+            assert!(
+                !e.starts_with('.'),
+                "{name} advertises {e} with a leading dot"
+            );
+            assert_eq!(e.to_lowercase(), *e, "{name} advertises {e} in mixed case");
+        }
+    }
+    // A container's extensions are what the hint matches, so they are the caller's map
+    // from a path to a probe tiebreak. Guard the ones the docs promise.
+    let ext_of = |n: &str| {
+        containers
+            .iter()
+            .find(|c| c.0 == n)
+            .map(|c| c.1)
+            .unwrap_or(&[])
+    };
+    assert!(ext_of("riff").contains(&"wav"));
+    assert!(ext_of("flac").contains(&"flac"));
+    assert!(ext_of("mpa").contains(&"mp3"));
+    assert!(ext_of("aiff").contains(&"aif"));
+}
+
+/// `DECODE-AC-01`: a real file on disk, renamed to the wrong extension, still probes by content.
+///
+/// The three cases are the three formats the acceptance names: FLAC as `.mp3`, MPEG audio
+/// as `.wav`, WAV as `.flac`. Each must open in `Mode::Strict`, report the codec its bytes
+/// say, and decode to the end — `open_path` must not let the extension decide.
+///
+/// The files are copied into a temporary directory with `std::env::temp_dir()` because the
+/// workspace has no registry packages in its `Cargo.lock` (ADR-002) and adding a crate for
+/// this would be the wrong trade. The name is unique per process to keep parallel runs apart,
+/// and `TempDir` removes it on drop — including when an assertion below fails, which a plain
+/// call at the end of the test would not do.
+#[test]
+fn renamed_files_probe_by_content_not_by_extension() {
+    /// Fixture path, renamed file name, and the predicate its bytes must satisfy.
+    type Case = (&'static str, &'static str, fn(&CodecId) -> bool);
+
+    /// Removes the directory when it goes out of scope, panic or not.
+    struct TempDir(std::path::PathBuf);
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures");
+    let dir = TempDir(std::env::temp_dir().join(format!("vynamp-ac01-{}", std::process::id())));
+    std::fs::create_dir_all(&dir.0).expect("temp dir");
+
+    let cases: [Case; 3] = [
+        ("flac/mono16.flac", "renamed-as-mp3.mp3", |c| {
+            matches!(c, CodecId::Flac)
+        }),
+        // Layer II exactly: the demuxer maps the layer field to the codec, so accepting
+        // any MPEG codec here would let a wrong layer pass.
+        ("mpeg/l2-A-44k-mono-64k.mp2", "renamed-as-wav.wav", |c| {
+            matches!(c, CodecId::Mp2)
+        }),
+        ("pcm/sine-s16le.wav", "renamed-as-flac.flac", |c| {
+            matches!(c, CodecId::Pcm(_))
+        }),
+    ];
+
+    let mut results = Vec::new();
+    for (source, renamed, want) in cases {
+        let src = root.join(source);
+        let data = std::fs::read(&src).unwrap_or_else(|e| panic!("{}: {e}", src.display()));
+        let path = dir.0.join(renamed);
+        std::fs::write(&path, &data).expect("write fixture copy");
+
+        let opts = Options {
+            mode: vynamp_decode_core::Mode::Strict,
+            ..Options::default()
+        };
+        let mut r = vynamp_decode::open_path(&path, opts)
+            .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        let codec = r.track().codec.clone();
+        assert!(
+            want(&codec),
+            "{source} renamed to {renamed} opened as {codec:?}, which its bytes do not say"
+        );
+        let frames = r.frames();
+        let mut buf = vynamp_decode_core::AudioBuffer::new();
+        let mut total = 0u64;
+        while r.read(&mut buf).expect("decode to the end") {
+            total += buf.frames() as u64;
+            assert!(buf.frames() > 0, "{source}: read returned an empty buffer");
+        }
+        // Nothing was silently dropped: the trimmed timeline is what came out.
+        if let Some(f) = frames {
+            assert_eq!(total, f, "{source}: decoded {total} of {f} frames");
+        }
+        assert!(total > 0, "{source} decoded no frames at all");
+        results.push((source, codec, total));
+    }
+
+    assert_eq!(results.len(), 3, "all three cases ran: {results:?}");
+}
