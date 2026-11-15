@@ -289,6 +289,18 @@ rede.
 | `DECODE-AC-31` | um FLAC lossless e um MP3 com tag LAME | a faixa é aberta e lida até o fim nos dois | o FLAC declara `delay`/`padding` zero e entrega `total_samples`; o MP3 declara os dois pela tag e entrega `frames − delay − padding` | `the_gapless_trim_is_declared_by_mpeg_and_absent_in_flac` |
 | `DECODE-AC-32` | um FLAC cortado no meio do bloco `STREAMINFO`, e um `STREAMINFO` que declara 2³¹−1 frames com `max_frames` em 1 000 000 | o probe e o decode rodam sobre os dois | o truncado devolve `Invalid { what: "unexpected eof" }` no offset do corte e o declarado devolve `Limit(Frames)`; nenhum dos dois entra em `panic!` | `truncated_streaminfo_is_a_typed_error`, `declared_length_beyond_max_frames_is_a_typed_error` |
 | `DECODE-AC-33` | o registro padrão | a enumeração de containers e codecs é consultada | sai com nome, extensões e nível de verificação, e o conjunto bate exatamente com as features ligadas | `registry_enumerates_names_extensions_and_verification` |
+| `DECODE-AC-34` | um corpus por perfil em `tests/fixtures/modern/`, gerado com o FFmpeg fixado e com um `MANIFEST.txt` dando sha256, taxa, canais, frames e o comando exato de cada arquivo (AAC-LC em mp4, ALAC em mp4, Vorbis em Ogg, Opus em Ogg e um M4B com um capítulo declarado) | cada fixture é aberta por `vynamp_decode::open_path` e medida em três pontos: `frames()` contra os frames do manifesto, um `Reader::seek` para o frame da metade seguido de leitura até `Ok(false)`, e as informações que o perfil declara ter | Fixture por perfil suporta duration/seek/metadata quando aplicável (TASK-E01-07-AC-1) | `modern_profiles_decode_like_their_manifest` |
+| `DECODE-AC-35` | um AAC-LC em mp4 cujo `esds` declara object type 2, e um HE-AAC v1 montado à mão a partir dele com o byte de AOT reescrito para 5, os dois a 48 kHz estéreo e com a mesma contagem de frames | o `default_registry()` é consultado sobre os dois — `Registry::probe`, o `CodecId` do demuxer, `codec_for` e a listagem de `codecs()` — e cada um é decodificado até o fim em `Mode::Strict` | HE-AAC não é anunciado por decode AAC-LC (TASK-E01-07-AC-2) | `he_aac_is_not_announced_by_aac_lc` |
+
+> **`DECODE-AC-34` e `-35` autorados em 2026-11-15, não aprovados.** A `TASK-E01-07`
+> não tinha linha nenhuma em §5: os dois critérios dela viviam só no doc da TASK. O
+> `Given`/`When` foi autorado a partir da tabela de critérios de
+> `tasks/items/TASK-E01-07.md`, e o `Then` é cópia literal do backlog. **Os dois testes
+> não existem** e são vermelhos por construção; a coluna `Teste` nomeia o que a TASK
+> cria. Aprovação é do mantenedor, por `GOVERNANCE.md`. A nota da abertura desta §5
+> diz que a aprovação "não antecipa critério nenhum que venha a ser acrescentado
+> depois" — estes dois foram acrescentados depois dela, e ficam declarados como não
+> cobertos por aquela aprovação.
 
 ### Critérios que esta spec **não** fixa
 
