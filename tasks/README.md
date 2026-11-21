@@ -23,7 +23,8 @@ Todas de produto; as de engenharia moram no umbrella.
 | `TASK-E17-16` | Certificar áudio cinematográfico e passthrough | vynamp-decode | planned |
 | `TASK-E17-17` | Expandir speech, AAC low-delay e legados | vynamp-decode | planned |
 
-O status oficial é o `tasks/backlog.json` do umbrella. O índice de épico fica lá
-também: uma cópia por repo divergiria.
+O status oficial vive na base **TASKs** do Notion (`AGENTS.md` §7 do umbrella); o
+`tasks/backlog.json` do umbrella guarda a spec e o índice de épico. Uma cópia por repo
+divergiria.
 Estados conferidos contra o backlog em 2026-11-12; `TASK-E01-01` fecha neste repo e o
 backlog do umbrella passa a `implemented` no PR de repin que segue o merge.
