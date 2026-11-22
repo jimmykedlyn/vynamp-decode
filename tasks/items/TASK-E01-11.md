@@ -15,9 +15,11 @@
 | Prioridade | P1 |
 | Estado | planned |
 | Depende de | `TASK-E01-04` |
-| Bloqueia | `TASK-E01-06`, `TASK-E01-07` |
+| Bloqueia | `TASK-E01-07` |
 | Modelo executor | Opus — áudio/RT, concorrência, segurança ou release |
 | Esforço | 5–12 dias úteis |
+| Deliverable | Demuxer MP4, adapter ALAC lossless e leitura de capítulos M4B. |
+| Acceptance | o PCM decodificado é bit-exato ao da origem; `frames()` devolve a contagem bruta do manifesto (antes de trim); um seek para o frame da metade seguido de leitura até `Ok(false)` cai no mesmo slice do decode linear; a lista de capítulos (título + timestamp) é igual ao FFMETADATA de origem; `frames()` devolve a contagem bruta do manifesto; seek para o frame da metade cai no slice esperado |
 | Risco | alto |
 | Tamanho | L |
 

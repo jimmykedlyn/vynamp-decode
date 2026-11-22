@@ -18,6 +18,8 @@
 | Bloqueia | `TASK-E01-06`, `TASK-E01-07` |
 | Modelo executor | Opus — áudio/RT, concorrência, segurança ou release |
 | Esforço | 5–12 dias úteis |
+| Deliverable | Demuxer Ogg e adapter Vorbis. |
+| Acceptance | SNR >= 90 dB contra a referência (tolerância explícita para lossy); `frames()` devolve a contagem bruta do manifesto; seek para o frame da metade cai no slice esperado |
 | Risco | alto |
 | Tamanho | L |
 

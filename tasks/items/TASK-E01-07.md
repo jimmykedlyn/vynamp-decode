@@ -18,32 +18,20 @@
 | Bloqueia | `TASK-E01-08`, `TASK-E03-03`, `TASK-E05-02`, `TASK-E05-06`, `TASK-E08-02`, `TASK-E17-02`, `TASK-E17-04`, `TASK-E18-01`, `TASK-E18-02` |
 | Modelo executor | Opus — áudio/RT, concorrência, segurança ou release |
 | Esforço | 5–12 dias úteis |
+| Deliverable | Adapter AAC-LC/HE-AAC conforme prova/licença; HE-AAC não é anunciado como AAC-LC. |
+| Acceptance | Fixture por perfil suporta duration/seek/metadata quando aplicável; HE-AAC não é anunciado por decode AAC-LC. |
 
-## Objetivo
+## Given — contexto de execução (autorado na execução)
 
-Adapter AAC-LC/HE-AAC conforme prova/licença; HE-AAC não é anunciado como AAC-LC.
+Licença válida do AAC-LC/HE-AAC; fixtures SBR com níveis conhecidos; containers ADTS e MP4.
 
-## Requisitos cobertos
+## When — ação (autorado na execução)
 
-| Req | Resultado | Restrições |
-|---|---|---|
-| REQ-E01-07 | Suportar AAC-LC com decoder de software; HE-AAC v1 **não** pode ser anunciado como AAC-LC; decidir backend FFmpeg nativo vs. symlink para libavcodec; não aceitar DRM. | ffmpeg ou caps negociados por capabilities; HE-AAC deve ser reportado como codec separado (não é AAC-LC) |
+Adapter compila com feature flag; no decode AAC-LC o HE-AAC **não** é anunciado; M0/M1 decodifica AAC-LC até o fim; HE-AAC SBR detectado e decodificado; seek/frame-accurate em todos os perfis.
 
-## Plano técnico
+## Then — resultado esperado (REQ literal)
 
-- Passos numerados, arquivos novos/modificados e serviços que sobem.
-- **Edge cases**: HE-AAC v1 com 960 ou 1024 samples/frame, AAC-LD/ELD (não suportado), DRM.
-- **Estratégia de teste**: unit tests + fixtures sintéticas; cross-check com ffmpeg.
-- **Riscos**: dependência de feature FFmpeg; licença; HE-AAC não anunciado como AAC-LC.
-
-## Critérios de aceite da spec (pendente)
-
-Nenhum `DECODE-AC-*` foi autorado para esta TASK.
-
-| ID | Given (contexto) | When (ação) | Then (resultado observável) |
-|---|---|---|---|
-| `TASK-E01-07-AC-1` | Fixture com AAC-LC de perfil compatível | Decode até o fim em `Mode::Strict` | PCM decodificado com SNR ≥ 90 dB contra referência; HE-AAC não é anunciado por decode AAC-LC. |
-| `TASK-E01-07-AC-2` | `default_registry()` consultado sobre AAC-LC e HE-AAC v1 | `probe`, `codec_for`, `codecs()` | HE-AAC v1 tem codec separado (não é AAC-LC). |
+Fixture por perfil suporta duration/seek/metadata quando aplicável; HE-AAC não é anunciado por decode AAC-LC.
 
 ## Verificação
 
@@ -54,74 +42,19 @@ Comandos, hardware, fixtures e como observou cada critério. "Testes passaram" n
 | `cargo test -p vynamp-decode` | pendente |
 | `cargo clippy --all-targets -- -D warnings` | pendente |
 
-##兼容性 / Riscos
+## Compatibilidade / Riscos
 
 Nenhum declarado.
 
-## Dependências
+## DoD — pronto para review
 
-- Depende de: `TASK-E01-04`, `TASK-E01-11`, `TASK-E01-12`, `TASK-E01-13`, `TASK-E01-14`
-- Bloqueia: `TASK-E01-08`, `TASK-E03-03`, `TASK-E05-02`, `TASK-E05-06`, `TASK-E08-02`, `TASK-E17-02`, `TASK-E17-04`, `TASK-E18-01`, `TASK-E18-02`
+- [ ] `cargo test` + `cargo clippy -D warnings` verdes no SHA final
+- [ ] Critérios da spec (`Then`) observados em fixtures/ambientes listados com motivo
+- [ ] Spec do módulo atualizada se a implementação revelou algo novo
+- [ ] `backlog.json` com o estado correto
+- [ ] Revisão feita por contexto limpo, não pelo implementador
+- [ ] PR aberto com template preenchido; CI Gate verde no SHA final
 
-## Definition of Done
+## Notas de execução
 
-- [ ] Objetivo implementado.
-- [ ] Testes e validações com evidência.
-- [ ] Edge cases tratados ou explicitamente fora de escopo.
-- [ ] Riscos documentados e sem surpresas.
-- [ ] PR revisado e mergeado.
-
-## Plano de teste (TDD)
-
-| ID | Given | When | Then |
-|---|---|---|---|
-| `TASK-E01-07-AT-1` | Fixture AAC-LC válida | Decode até o fim | PCM decodificado |
-| `TASK-E01-07-AT-2` | Registry com codecs | `probe`, `codec_for`, `codecs()` | HE-AAC reportado separado de AAC-LC |
-
-## Riscos
-
-Pendente.
-
-## Critérios de aceite — rascunho (não conta como pronto)
-
-Nenhum critério ainda. Se precisar, use rascunho com status `draft` e link para spec/issue; não copie para a matriz final.
-
-## Plano de execução
-
-1. Descreva o passo.
-2. Use checklists para cada dia ou story.
-3. Atualize `tasks/backlog.json` quando terminar (status, branch, PR).
-
-## Dependências
-
-- Depende de: `TASK-E01-04`, `TASK-E01-11`, `TASK-E01-12`, `TASK-E01-13`, `TASK-E01-14`
-- Bloqueia: `TASK-E01-08`, `TASK-E03-03`, `TASK-E05-02`, `TASK-E05-06`, `TASK-E08-02`, `TASK-E17-02`, `TASK-E17-04`, `TASK-E18-01`, `TASK-E18-02`
-
-## Definition of Done
-
-- [ ] Objetivo implementado.
-- [ ] Testes e validações com evidência.
-- [ ] Edge cases tratados ou explicitamente fora de escopo.
-- [ ] Riscos documentados e sem surpresas.
-- [ ] PR revisado e mergeado.
-
-## Plano de teste (TDD)
-
-| ID | Given | When | Then |
-|---|---|---|---|
-| `TASK-E01-07-AT-1` | Fixture AAC-LC válida | Decode até o fim | PCM decodificado |
-| `TASK-E01-07-AT-2` | Registry com codecs | `probe`, `codec_for`, `codecs()` | HE-AAC reportado separado de AAC-LC |
-
-## Riscos
-
-Pendente.
-
-## Critérios de aceite — rascunho (não conta como pronto)
-
-Nenhum critério ainda. Se precisar, use rascunho com status `draft` e link para spec/issue; não copie para a matriz final.
-
-## Plano de execução
-
-1. Descreva o passo.
-2. Use checklists para cada dia ou story.
-3. Atualize `tasks/backlog.json` quando terminar (status, branch, PR).
+Preenchido durante a execução, não antes.

@@ -1,4 +1,4 @@
-# TASK-E01-14 — Opus SILK/híbrido em Ogg
+# TASK-E01-14 — Opus SILK + modo híbrido
 
 > Gerado pelo passo 37 a partir de `tasks/backlog.json`. Os campos de estado vêm do
 > backlog e não devem ser editados aqui. A coluna `Then` é o requisito aprovado,
@@ -18,6 +18,8 @@
 | Bloqueia | `TASK-E01-06`, `TASK-E01-07` |
 | Modelo executor | Opus — áudio/RT, concorrência, segurança ou release |
 | Esforço | 5–12 dias úteis |
+| Deliverable | Adapter Opus SILK e modo híbrido em Ogg. |
+| Acceptance | SNR >= 80 dB contra a referência (tolerância explícita, menor que CELT pelo codec); `frames()` devolve a contagem bruta do manifesto; seek para o frame da metade cai no slice esperado |
 | Risco | alto |
 | Tamanho | L |
 
