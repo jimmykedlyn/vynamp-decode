@@ -1,0 +1,65 @@
+# TASK-E01-12 — Ogg demux + Vorbis
+
+> Gerado pelo fatiamento de `TASK-E01-07` em 2026-11-21. Os campos de estado vêm do
+> backlog e não devem ser editados aqui. A coluna `Then` é o requisito aprovado,
+> copiado literal do backlog; `Given` e `When` foram autorados na execução.
+
+| Campo | Valor |
+|---|---|
+| ID | `TASK-E01-12` |
+| Módulo dono | `vynamp-decode` |
+| Repo | `jimmykedlyn/vynamp-decode` |
+| REQ coberto | `REQ-E01-07` (sub-requisito `DECODE-REQ-46b`) |
+| Critérios da spec | pendente — `specs/decode.md` §5 (`DECODE-AC-38`) |
+| Fase | M2 |
+| Prioridade | P1 |
+| Estado | planned |
+| Depende de | `TASK-E01-04` |
+| Bloqueia | `TASK-E01-07` |
+| Modelo executor | Opus — áudio/RT, concorrência, segurança ou release |
+| Esforço | 2–5 dias úteis |
+| Risco | médio |
+
+## Entrega
+
+Demuxer Ogg e adapter Vorbis.
+
+## Boundary
+
+- **Não** cobre Opus. Opus em Ogg é `TASK-E01-13` (CELT) e `TASK-E01-14` (SILK/híbrido), que compartilham o demuxer Ogg mas têm critérios próprios.
+- **Não** define política de trim ou gapless. Pre-skip e end trim são `TASK-E17-02`; aqui o adapter só reporta o que o container declara.
+- **Não** faz encoding. A regra de não anunciar encoding é `DECODE-REQ-59`, provada quando o primeiro codec da família entra. Nenhuma TASK do backlog é dona disso: a autoridade é a spec do módulo em `specs/formatos.md`, que fixa a regra do `DECODE-REQ-59`.
+
+## Antes de começar
+
+- [ ] Spec do módulo aprovada e o critério de aceite citado já existe nela
+- [ ] Worktree própria criada (`cargo xtask repo worktree task-e01-12-claude-<slug>`)
+- [ ] Fixtures/hardware necessários disponíveis ou limitação registrada
+- [ ] Nenhuma TASK em execução tocando os mesmos arquivos
+
+## Critérios de aceite
+
+| ID | Given | When | Then |
+|---|---|---|---|
+| `TASK-E01-12-AC-1` | um Vorbis em Ogg gerado pelo FFmpeg fixado (`-c:a libvorbis`), listado no `MANIFEST.txt` com sha256, taxa, canais e frames, mais o decode de referência produzido pelo mesmo FFmpeg (`ffmpeg -i in.ogg -f wav ref.wav`) | o arquivo é decodificado e o PCM é comparado contra o WAV de referência | SNR >= 90 dB contra a referência (tolerância explícita para lossy); `frames()` devolve a contagem bruta do manifesto; seek para o frame da metade cai no slice esperado |
+
+## Verificação
+
+| Item | Comando / fixture | Evidência esperada |
+|---|---|---|
+| Teste automatizado | `cargo test -p vynamp-decode --test modern_profiles --locked` | verde no CI Gate |
+| Oráculo independente | WAV de referência gerado pelo mesmo FFmpeg fixado, não pela implementação sob teste | comparação SNR contra fonte externa |
+
+## DoD — pronto para review
+
+- [ ] Todos os critérios de aceite com evidência
+- [ ] `cargo fmt --check` e `cargo clippy --all-targets -- -D warnings` limpos
+- [ ] `cargo test` verde; testes ignorados listados com motivo
+- [ ] Spec do módulo atualizada se a implementação revelou algo novo
+- [ ] `backlog.json` com o estado correto
+- [ ] Revisão feita por contexto limpo, não pelo implementador
+- [ ] PR aberto com template preenchido; CI Gate verde no SHA final
+
+## Notas de execução
+
+Preenchido durante a execução, não antes.
