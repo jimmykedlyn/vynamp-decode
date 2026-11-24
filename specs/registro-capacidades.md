@@ -175,7 +175,7 @@ Depende de: `vynamp-dsp` (opcional, feature `resample`)
 
 | Limitação | Consequência | Quem cobre |
 |---|---|---|
-| O registro tem 4 containers e 4 codecs: RIFF/AIFF/FLAC/MPEG audio. | Os outros 60+ formatos do catálogo seguem `planned`; nenhum é anunciado. | `specs/formatos.md` §4, `TASK-E01-07/08/09`, `TASK-E17-03/05` |
+| O registro tem 4 containers e 4 codecs: RIFF/AIFF/FLAC/MPEG audio. | Os outros 60+ formatos do catálogo seguem `planned`; nenhum é anunciado. | `specs/formatos.md` §4 (`DECODE-REQ-46-AAC`, `-MP4`, `-VORBIS`, `-OPUS-CELT`, `-OPUS-SILK`, `DECODE-REQ-47`, `-48`), `TASK-E01-07/11/12/13/14/08/09`, `TASK-E17-03/05` |
 | Não há capability de runtime por tuple, só `Verification` por descritor. | A UI só sabe "abre ou não abre", sem perfil, backend ou limites. | `DECODE-REQ-70`, `TASK-E17-01` (M3) |
 | Rejeição de probe não diz o motivo. | O usuário vê só "formato não suportado". | `DECODE-REQ-71` |
 | MPEG Layer I é `Experimental`. | Não pode ser vendido como suporte verificado. | `TASK-E17-17` (legados) |

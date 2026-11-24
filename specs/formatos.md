@@ -84,7 +84,11 @@ Formatos planejados (sem teste; nenhum entra no registro antes do teste):
 
 | ID | Requisito | REQ de produto | TASK | Onde é provado |
 |---|---|---|---|---|
-| DECODE-REQ-46 | AAC-LC em MP4 e ADTS, HE-AAC, ALAC em MP4, Vorbis e Opus em Ogg; capítulos | REQ-E01-07 | TASK-E01-07 | planned, sem teste |
+| DECODE-REQ-46-AAC | AAC-LC em MP4 e ADTS; HE-AAC nunca anunciado como AAC-LC | REQ-E01-07 | TASK-E01-07 | planned, sem teste (`DECODE-AC-34`, `DECODE-AC-35` em `specs/decode.md`) |
+| DECODE-REQ-46-MP4 | Demuxer MP4, ALAC lossless em MP4 e leitura de capítulos de M4B | REQ-E01-11 | TASK-E01-11 | planned, sem teste (`DECODE-AC-53`, `DECODE-AC-54`) |
+| DECODE-REQ-46-VORBIS | Demuxer Ogg e Vorbis em Ogg | REQ-E01-12 | TASK-E01-12 | planned, sem teste (`DECODE-AC-55`) |
+| DECODE-REQ-46-OPUS-CELT | Opus CELT-only fullband em Ogg, sobre o demuxer Ogg de `DECODE-REQ-46-VORBIS` | REQ-E01-13 | TASK-E01-13 | planned, sem teste (`DECODE-AC-56`) |
+| DECODE-REQ-46-OPUS-SILK | Opus SILK-only e híbrido (SILK+CELT) em Ogg, sobre o demuxer Ogg de `DECODE-REQ-46-VORBIS` | REQ-E01-14 | TASK-E01-14 | planned, sem teste (`DECODE-AC-57`) |
 | DECODE-REQ-47 | CAF, AU, G.711, ADPCM, FLAC em Ogg/MP4/Matroska, WavPack, APE, TTA, WMA, Musepack, WebM/Matroska; arquivos grandes | REQ-E01-08 | TASK-E01-08 | planned, sem teste |
 | DECODE-REQ-48 | Mapa de canais completo (`channel_mask`) e DSD convertido para PCM | REQ-E01-09 | TASK-E01-09 | planned, sem teste |
 | DECODE-REQ-49 | Módulos tracker, MIDI e codecs raros | REQ-E12-05 | TASK-E12-05 | planned, sem teste |
@@ -98,6 +102,11 @@ Formatos planejados (sem teste; nenhum entra no registro antes do teste):
 | DECODE-REQ-57 | AC-3, E-AC-3, DTS e TrueHD, inclusive passthrough | REQ-E17-16 | TASK-E17-16 | planned, sem teste |
 | DECODE-REQ-58 | Codecs de fala, AAC low-delay e formatos legados | REQ-E17-17 | TASK-E17-17 | planned, sem teste |
 | DECODE-REQ-59 | Codec presente para playback não autoriza anunciar encoding; a lista de "formatos disponíveis" sai do build real | REQ-E01-07 | TASK-E01-07 | regra de `reference/audio/02-formats.md`; provada quando o primeiro codec planejado entrar |
+
+O antigo `DECODE-REQ-46` ("AAC-LC em MP4 e ADTS, HE-AAC, ALAC em MP4, Vorbis e Opus em
+Ogg; capítulos", todo da `TASK-E01-07`) foi dividido em 2026-11-24, junto com o
+fatiamento da `TASK-E01-07` em `TASK-E01-07/11/12/13/14`: cada sub-requisito acima tem um
+nome próprio e uma TASK dona. O ID sem sufixo não é mais usado.
 
 ## 5. Critérios de aceite
 
@@ -126,10 +135,23 @@ Formatos planejados (sem teste; nenhum entra no registro antes do teste):
 | DECODE-AC-50 | um MP2 com índice de scalefactor 63 | é decodificado | erro `Invalid` | `mp2.rs::scalefactor_index_63_is_invalid` |
 | DECODE-AC-51 | um MP3 que começa dentro do bit reservoir | é decodificado | sai silêncio até o reservoir encher, sem erro | `mp3.rs::a_stream_that_starts_inside_the_reservoir_decodes_silently_until_it_is_filled` |
 | DECODE-AC-52 | MP2 e MP3 de referência | são decodificados | a saída cumpre o critério ISO de precisão total contra o oráculo | `mp2.rs::matches_ffmpeg_under_the_iso_full_accuracy_criterion`, `mp3.rs::matches_ffmpeg_under_the_iso_full_accuracy_criterion` |
+| DECODE-AC-53 | um ALAC em MP4 em `tests/fixtures/modern/alac/`, gerado pelo FFmpeg fixado (`-c:a alac`), e o PCM de origem usado para produzi-lo, ambos no `MANIFEST.txt` do diretório com sha256 e frame count | o arquivo é aberto por `vynamp_decode::open_path` e decodificado até o fim; o PCM resultante é comparado amostra a amostra contra o PCM de origem | o PCM decodificado é bit-exato ao da origem; `frames()` devolve a contagem bruta do manifesto (antes de trim); um seek para o frame da metade seguido de leitura até `Ok(false)` cai no mesmo slice do decode linear (TASK-E01-11-AC-1) | `mp4_alac.rs::alac_in_mp4_decodes_bit_exact_to_its_source` |
+| DECODE-AC-54 | um M4B em `tests/fixtures/modern/alac/`, gerado pelo FFmpeg fixado (`-f ipod -map_metadata`) com um capítulo declarado via FFMETADATA, listado no `MANIFEST.txt` do diretório | o arquivo é aberto e os capítulos são enumerados pela API pública | a lista de capítulos (título + timestamp) é igual à do FFMETADATA de origem; `frames()` devolve a contagem bruta do manifesto; seek para o frame da metade cai no slice esperado (TASK-E01-11-AC-2) | `mp4_alac.rs::m4b_chapters_match_their_ffmetadata` |
+| DECODE-AC-55 | um Vorbis em Ogg em `tests/fixtures/modern/vorbis/`, gerado pelo FFmpeg fixado (`-c:a libvorbis`), listado no `MANIFEST.txt` do diretório com sha256, taxa, canais e frames, mais o decode de referência produzido pelo mesmo FFmpeg (`ffmpeg -i in.ogg -f wav ref.wav`) | o arquivo é decodificado e o PCM é comparado contra o WAV de referência | SNR >= 90 dB contra a referência (tolerância explícita para lossy); `frames()` devolve a contagem bruta do manifesto; seek para o frame da metade cai no slice esperado (TASK-E01-12-AC-1) | `ogg_vorbis.rs::vorbis_in_ogg_matches_the_ffmpeg_reference` |
+| DECODE-AC-56 | um Opus CELT-only fullband em Ogg em `tests/fixtures/modern/opus-celt/`, gerado pelo FFmpeg fixado (`-c:a libopus -application audio`), listado no `MANIFEST.txt` do diretório com sha256, taxa, canais e frames, mais o decode de referência produzido pelo mesmo FFmpeg | o arquivo é decodificado e o PCM é comparado contra o WAV de referência | SNR >= 90 dB contra a referência (tolerância explícita para lossy); `frames()` devolve a contagem bruta do manifesto (antes de pre-skip); seek para o frame da metade cai no slice esperado (TASK-E01-13-AC-1) | `opus_celt.rs::opus_celt_matches_the_ffmpeg_reference` |
+| DECODE-AC-57 | um Opus SILK-only e um Opus híbrido em Ogg em `tests/fixtures/modern/opus-silk/`, gerados pelo FFmpeg fixado a partir de uma origem mono de banda larga (ruído rosa de 5 s modulado em amplitude a 4 Hz, `anoisesrc=color=pink:amplitude=0.3:duration=5:sample_rate=48000,volume='0.5+0.5*sin(2*PI*4*t)':eval=frame`; um tom puro não serve, porque o libopus troca para CELT): o SILK-only da origem reamostrada para 16 kHz com `-c:a libopus -application voip -b:a 16k`, o híbrido da origem a 48 kHz com `-c:a libopus -application voip -b:a 24k` (fullband, bitrate baixo); cada um listado no `MANIFEST.txt` do diretório com sha256, taxa, canais e frames, e com decode de referência do mesmo FFmpeg | o byte de TOC de cada pacote de áudio dos dois arquivos é lido do Ogg (RFC 6716 §3.1, os 5 bits altos dão o config), e depois cada arquivo é decodificado e o PCM é comparado contra o WAV de referência correspondente | todo pacote do arquivo SILK-only tem config de TOC entre 0 e 11 e todo pacote do arquivo híbrido tem config de TOC entre 12 e 15; SNR >= 80 dB contra a referência (tolerância explícita, menor que CELT pelo codec); `frames()` devolve a contagem bruta do manifesto; seek para o frame da metade cai no slice esperado (TASK-E01-14-AC-1) | `opus_silk_hybrid.rs::opus_silk_and_hybrid_match_the_ffmpeg_reference` |
+
+> **`DECODE-AC-53` a `-57` autorados em 2026-11-24, não aprovados.** Vêm do fatiamento da
+> `TASK-E01-07` (`DECODE-REQ-46-MP4`, `-VORBIS`, `-OPUS-CELT`, `-OPUS-SILK`); o `Then` de
+> cada um é cópia literal da TASK correspondente, e os testes não existem ainda: a
+> coluna `Teste` nomeia o que cada TASK cria. Cada TASK tem arquivo de teste e diretório
+> de fixture próprios, para que rodem em paralelo sem disputar o mesmo arquivo. Os
+> números 36 a 40 já são AIFF/PCM nesta tabela e não foram reaproveitados. Aprovação é
+> do mantenedor, por `GOVERNANCE.md`.
 
 ### Critérios que esta spec **não** fixa
 
-- Critério de aceite para os formatos planejados (DECODE-REQ-46 a 58): cada TASK
+- Critério de aceite para os formatos planejados (DECODE-REQ-47 a 58): cada TASK
   escreve os seus antes de sair de `planned`.
 - Desempenho (tempo de decodificação por segundo de áudio): é de `specs/decode.md`.
 
@@ -168,7 +190,7 @@ Depende de: `vynamp-dsp` (opcional, feature `resample`)
 
 | Limitação | Consequência | Quem cobre |
 |---|---|---|
-| Só PCM (WAV/RF64/Wave64/AIFF), FLAC nativo e MPEG Layer I/II/III estão implementados | AAC, ALAC, Vorbis, Opus e todo o resto do catálogo de `reference/audio/02-formats.md` não tocam | TASK-E01-07, E01-08, E17-03..05, E17-13..17 |
+| Só PCM (WAV/RF64/Wave64/AIFF), FLAC nativo e MPEG Layer I/II/III estão implementados | AAC, ALAC, Vorbis, Opus e todo o resto do catálogo de `reference/audio/02-formats.md` não tocam | TASK-E01-07 (AAC), E01-11 (MP4/ALAC/M4B), E01-12 (Ogg/Vorbis), E01-13 e E01-14 (Opus), E01-08, E17-03..05, E17-13..17 |
 | `channel_mask` é lido mas não vira mapa de canais | arquivo multicanal sai na ordem do arquivo | TASK-E01-09 |
 | Sem DSD, MIDI, tracker nem CD | esses arquivos são rejeitados com `Unsupported` | TASK-E01-09, E12-05, E12-06 |
 | Sem leitura de metadata, CUE ou capa (C12) | tags são puladas, não expostas | fora deste módulo (§7) |
