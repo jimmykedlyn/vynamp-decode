@@ -12,7 +12,7 @@
 | REQ coberto | `REQ-E01-14` (sub-requisito `DECODE-REQ-46-OPUS-SILK` em `specs/formatos.md` §4) |
 | Critérios da spec | `specs/formatos.md` §5 — `DECODE-AC-57` (autorado, não aprovado) |
 | Fase | M2 |
-| Prioridade | P1 |
+| Prioridade | P0 |
 | Estado | planned |
 | Depende de | `TASK-E01-04`, `TASK-E01-12`, `TASK-E01-13` |
 | Bloqueia | `TASK-E01-07` |

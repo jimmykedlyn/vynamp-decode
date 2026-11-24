@@ -14,7 +14,7 @@
 | REQ coberto | `REQ-E01-07` (sub-requisito `DECODE-REQ-46-AAC` em `specs/formatos.md` §4) |
 | Critérios da spec | `specs/decode.md` §5 — `DECODE-AC-34`, `DECODE-AC-35` (autorados, não aprovados) |
 | Fase | M2 |
-| Prioridade | P1 |
+| Prioridade | P0 |
 | Estado | planned |
 | Depende de | `TASK-E01-04`, `TASK-E01-11`, `TASK-E01-12`, `TASK-E01-13`, `TASK-E01-14` |
 | Bloqueia | `TASK-E01-08`, `TASK-E03-03`, `TASK-E05-02`, `TASK-E05-06`, `TASK-E08-02`, `TASK-E17-02`, `TASK-E17-04`, `TASK-E18-01`, `TASK-E18-02` |

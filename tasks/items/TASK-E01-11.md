@@ -12,7 +12,7 @@
 | REQ coberto | `REQ-E01-11` (sub-requisito `DECODE-REQ-46-MP4` em `specs/formatos.md` §4) |
 | Critérios da spec | `specs/formatos.md` §5 — `DECODE-AC-53`, `DECODE-AC-54` (autorados, não aprovados) |
 | Fase | M2 |
-| Prioridade | P1 |
+| Prioridade | P0 |
 | Estado | planned |
 | Depende de | `TASK-E01-04` |
 | Bloqueia | `TASK-E01-07` |
