@@ -1,6 +1,6 @@
 # TASK-E01-11 — MP4 demux + ALAC + M4B (capítulos)
 
-> Gerado pelo fatiamento de `TASK-E01-07` em 2026-11-21. Os campos de estado vêm do
+> Gerado pelo fatiamento de `TASK-E01-07` em 2026-11-22. Os campos de estado vêm do
 > backlog e não devem ser editados aqui. A coluna `Then` é o requisito aprovado,
 > copiado literal do backlog; `Given` e `When` foram autorados na execução.
 
@@ -50,6 +50,7 @@ Demuxer MP4, adapter ALAC lossless e leitura de capítulos M4B.
 | Item | Comando / fixture | Evidência esperada |
 |---|---|---|
 | Teste automatizado | `cargo test -p vynamp-decode --test mp4_alac --locked` (arquivo `crates/vynamp-decode/tests/mp4_alac.rs`, só desta TASK) | verde no CI Gate |
+| Geração de fixture | `pwsh tools/fixtures/generate-alac.ps1` com o `$env:FFMPEG` (script próprio desta TASK, criado por ela; não toca `tools/fixtures/generate.ps1` nem o diretório de outra TASK) | escreve só `tests/fixtures/modern/alac/` e o `MANIFEST.txt` dele, com o comando exato de cada arquivo; rodar duas vezes deixa os mesmos arquivos |
 | Oráculo independente | PCM de origem gerado antes do ALAC; FFMETADATA de origem preservado como fixture | comparação bit-exata e enumeração de capítulos contra fonte, não contra espelho da implementação |
 
 ## DoD — pronto para review

@@ -1,7 +1,7 @@
 # TASK-E01-07 — AAC-LC + HE-AAC (não anunciado como AAC-LC)
 
 > Gerado pelo passo 37 a partir de `tasks/backlog.json`; reduzido pelo fatiamento de
-> 2026-11-21, que separou MP4/ALAC/M4B (`TASK-E01-11`), Ogg/Vorbis (`TASK-E01-12`) e
+> 2026-11-22, que separou MP4/ALAC/M4B (`TASK-E01-11`), Ogg/Vorbis (`TASK-E01-12`) e
 > Opus (`TASK-E01-13`, `TASK-E01-14`). Os campos de estado vêm do backlog e não devem
 > ser editados aqui. A coluna `Then` é o requisito aprovado, copiado literal do
 > backlog; `Given` e `When` foram autorados na execução.

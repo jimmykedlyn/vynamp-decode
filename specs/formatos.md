@@ -101,11 +101,11 @@ Formatos planejados (sem teste; nenhum entra no registro antes do teste):
 | DECODE-REQ-56 | IAMF como modelo e renderer | REQ-E17-15 | TASK-E17-15 | planned, sem teste |
 | DECODE-REQ-57 | AC-3, E-AC-3, DTS e TrueHD, inclusive passthrough | REQ-E17-16 | TASK-E17-16 | planned, sem teste |
 | DECODE-REQ-58 | Codecs de fala, AAC low-delay e formatos legados | REQ-E17-17 | TASK-E17-17 | planned, sem teste |
-| DECODE-REQ-59 | Codec presente para playback não autoriza anunciar encoding; a lista de "formatos disponíveis" sai do build real | REQ-E01-07 | TASK-E01-07 | regra de `reference/audio/02-formats.md`; provada quando o primeiro codec planejado entrar |
+| DECODE-REQ-59 | Codec presente para playback não autoriza anunciar encoding; a lista de "formatos disponíveis" sai do build real | REQ-E01-07 | TASK-E01-07 | regra de `reference/audio/02-formats.md`; sem critério ainda. A dona é a `TASK-E01-07`, que fecha o fatiamento depois das `TASK-E01-11..14`; estas registram só decode e não anunciam encoding, mas não são donas da prova |
 
 O antigo `DECODE-REQ-46` ("AAC-LC em MP4 e ADTS, HE-AAC, ALAC em MP4, Vorbis e Opus em
-Ogg; capítulos", todo da `TASK-E01-07`) foi dividido em 2026-11-24, junto com o
-fatiamento da `TASK-E01-07` em `TASK-E01-07/11/12/13/14`: cada sub-requisito acima tem um
+Ogg; capítulos", todo da `TASK-E01-07`) foi dividido em 2026-11-24, seguindo o
+fatiamento da `TASK-E01-07` em `TASK-E01-07/11/12/13/14` de 2026-11-22: cada sub-requisito acima tem um
 nome próprio e uma TASK dona. O ID sem sufixo não é mais usado.
 
 ## 5. Critérios de aceite
@@ -139,7 +139,7 @@ nome próprio e uma TASK dona. O ID sem sufixo não é mais usado.
 | DECODE-AC-54 | um M4B em `tests/fixtures/modern/alac/`, gerado pelo FFmpeg fixado (`-f ipod -map_metadata`) com um capítulo declarado via FFMETADATA, listado no `MANIFEST.txt` do diretório | o arquivo é aberto e os capítulos são enumerados pela API pública | a lista de capítulos (título + timestamp) é igual à do FFMETADATA de origem; `frames()` devolve a contagem bruta do manifesto; seek para o frame da metade cai no slice esperado (TASK-E01-11-AC-2) | `mp4_alac.rs::m4b_chapters_match_their_ffmetadata` |
 | DECODE-AC-55 | um Vorbis em Ogg em `tests/fixtures/modern/vorbis/`, gerado pelo FFmpeg fixado (`-c:a libvorbis`), listado no `MANIFEST.txt` do diretório com sha256, taxa, canais e frames, mais o decode de referência produzido pelo mesmo FFmpeg (`ffmpeg -i in.ogg -f wav ref.wav`) | o arquivo é decodificado e o PCM é comparado contra o WAV de referência | SNR >= 90 dB contra a referência (tolerância explícita para lossy); `frames()` devolve a contagem bruta do manifesto; seek para o frame da metade cai no slice esperado (TASK-E01-12-AC-1) | `ogg_vorbis.rs::vorbis_in_ogg_matches_the_ffmpeg_reference` |
 | DECODE-AC-56 | um Opus CELT-only fullband em Ogg em `tests/fixtures/modern/opus-celt/`, gerado pelo FFmpeg fixado (`-c:a libopus -application audio`), listado no `MANIFEST.txt` do diretório com sha256, taxa, canais e frames, mais o decode de referência produzido pelo mesmo FFmpeg | o arquivo é decodificado e o PCM é comparado contra o WAV de referência | SNR >= 90 dB contra a referência (tolerância explícita para lossy); `frames()` devolve a contagem bruta do manifesto (antes de pre-skip); seek para o frame da metade cai no slice esperado (TASK-E01-13-AC-1) | `opus_celt.rs::opus_celt_matches_the_ffmpeg_reference` |
-| DECODE-AC-57 | um Opus SILK-only e um Opus híbrido em Ogg em `tests/fixtures/modern/opus-silk/`, gerados pelo FFmpeg fixado a partir de uma origem mono de banda larga (ruído rosa de 5 s modulado em amplitude a 4 Hz, `anoisesrc=color=pink:amplitude=0.3:duration=5:sample_rate=48000,volume='0.5+0.5*sin(2*PI*4*t)':eval=frame`; um tom puro não serve, porque o libopus troca para CELT): o SILK-only da origem reamostrada para 16 kHz com `-c:a libopus -application voip -b:a 16k`, o híbrido da origem a 48 kHz com `-c:a libopus -application voip -b:a 24k` (fullband, bitrate baixo); cada um listado no `MANIFEST.txt` do diretório com sha256, taxa, canais e frames, e com decode de referência do mesmo FFmpeg | o byte de TOC de cada pacote de áudio dos dois arquivos é lido do Ogg (RFC 6716 §3.1, os 5 bits altos dão o config), e depois cada arquivo é decodificado e o PCM é comparado contra o WAV de referência correspondente | todo pacote do arquivo SILK-only tem config de TOC entre 0 e 11 e todo pacote do arquivo híbrido tem config de TOC entre 12 e 15; SNR >= 80 dB contra a referência (tolerância explícita, menor que CELT pelo codec); `frames()` devolve a contagem bruta do manifesto; seek para o frame da metade cai no slice esperado (TASK-E01-14-AC-1) | `opus_silk_hybrid.rs::opus_silk_and_hybrid_match_the_ffmpeg_reference` |
+| DECODE-AC-57 | um Opus SILK-only e um Opus híbrido em Ogg em `tests/fixtures/modern/opus-silk/`, gerados pelo FFmpeg fixado a partir da mesma origem mono de banda larga com semente fixa (`-f lavfi -i "anoisesrc=color=pink:amplitude=0.3:duration=5:sample_rate=48000:seed=42,volume='0.5+0.5*sin(2*PI*4*t)':eval=frame"`, ruído rosa de 5 s modulado em amplitude a 4 Hz; um tom puro não serve, porque o libopus troca para CELT) e com `-fflags +bitexact -serial_offset 0`, para que cada geração saia byte a byte igual: o SILK-only com `-ac 1 -ar 16000 -c:a libopus -application voip -b:a 16k`, o híbrido com `-ac 1 -c:a libopus -application voip -b:a 18k` (48 kHz fullband, bitrate baixo; 18k fica no meio da faixa de 14k a 22k em que todo pacote saiu híbrido na medição, e a 24k já apareceram pacotes CELT config 31 misturados); cada um listado no `MANIFEST.txt` do diretório com sha256, taxa, canais e frames, e com decode de referência do mesmo FFmpeg | o byte de TOC de cada pacote de áudio dos dois arquivos é lido do Ogg (RFC 6716 §3.1, os 5 bits altos dão o config), e depois cada arquivo é decodificado e o PCM é comparado contra o WAV de referência correspondente | todo pacote do arquivo SILK-only tem config de TOC entre 0 e 11 e todo pacote do arquivo híbrido tem config de TOC entre 12 e 15; SNR >= 80 dB contra a referência (tolerância explícita, menor que CELT pelo codec); `frames()` devolve a contagem bruta do manifesto; seek para o frame da metade cai no slice esperado (TASK-E01-14-AC-1) | `opus_silk_hybrid.rs::opus_silk_and_hybrid_match_the_ffmpeg_reference` |
 
 > **`DECODE-AC-53` a `-57` autorados em 2026-11-24, não aprovados.** Vêm do fatiamento da
 > `TASK-E01-07` (`DECODE-REQ-46-MP4`, `-VORBIS`, `-OPUS-CELT`, `-OPUS-SILK`); o `Then` de
@@ -185,6 +185,14 @@ Depende de: `vynamp-dsp` (opcional, feature `resample`)
 - Teste que depende de arquivo grande fica atrás de `#[ignore]` com motivo escrito e
   variável de ambiente documentada no próprio teste.
 - `cargo test --workspace` em `libs/decode` roda tudo o que não é `#[ignore]`.
+- Fixtures dos codecs modernos: cada TASK tem script de geração próprio em
+  `tools/fixtures/`, que escreve só no seu diretório de `tests/fixtures/modern/` e o
+  `MANIFEST.txt` dele, sem tocar `generate.ps1` nem o diretório de outra TASK:
+  `generate-alac.ps1` → `modern/alac/` (`TASK-E01-11`), `generate-vorbis.ps1` →
+  `modern/vorbis/` (`TASK-E01-12`), `generate-opus-celt.ps1` → `modern/opus-celt/`
+  (`TASK-E01-13`), `generate-opus-silk.ps1` → `modern/opus-silk/` (`TASK-E01-14`).
+  O AAC da `TASK-E01-07` continua na seção AAC-LC de `generate.ps1`. Cada script é
+  criado pela TASK dona e usa o FFmpeg de `$env:FFMPEG`.
 
 ## 10. Limitações conhecidas
 

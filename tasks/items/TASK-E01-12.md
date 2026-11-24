@@ -1,6 +1,6 @@
 # TASK-E01-12 — Ogg demux + Vorbis
 
-> Gerado pelo fatiamento de `TASK-E01-07` em 2026-11-21. Os campos de estado vêm do
+> Gerado pelo fatiamento de `TASK-E01-07` em 2026-11-22. Os campos de estado vêm do
 > backlog e não devem ser editados aqui. A coluna `Then` é o requisito aprovado,
 > copiado literal do backlog; `Given` e `When` foram autorados na execução.
 
@@ -28,7 +28,7 @@ Demuxer Ogg e adapter Vorbis.
 
 - **Não** cobre Opus. Opus em Ogg é `TASK-E01-13` (CELT) e `TASK-E01-14` (SILK/híbrido), que compartilham o demuxer Ogg mas têm critérios próprios.
 - **Não** define política de trim ou gapless. Pre-skip e end trim são `TASK-E17-02`; aqui o adapter só reporta o que o container declara.
-- **Não** faz encoding. A regra de não anunciar encoding é `DECODE-REQ-59`, provada quando o primeiro codec da família entra. Nenhuma TASK do backlog é dona disso: a autoridade é a spec do módulo em `specs/formatos.md`, que fixa a regra do `DECODE-REQ-59`.
+- **Não** faz encoding nem prova a regra de não anunciá-lo. Essa regra é o `DECODE-REQ-59`, que `specs/formatos.md` §4 dá à `TASK-E01-07`; aqui o codec é registrado só para decode, e a prova fica com a dona.
 
 ## Antes de começar
 
@@ -48,6 +48,7 @@ Demuxer Ogg e adapter Vorbis.
 | Item | Comando / fixture | Evidência esperada |
 |---|---|---|
 | Teste automatizado | `cargo test -p vynamp-decode --test ogg_vorbis --locked` (arquivo `crates/vynamp-decode/tests/ogg_vorbis.rs`, só desta TASK) | verde no CI Gate |
+| Geração de fixture | `pwsh tools/fixtures/generate-vorbis.ps1` com o `$env:FFMPEG` (script próprio desta TASK, criado por ela; não toca `tools/fixtures/generate.ps1` nem o diretório de outra TASK) | escreve só `tests/fixtures/modern/vorbis/` e o `MANIFEST.txt` dele, com o comando exato de cada arquivo; rodar duas vezes deixa os mesmos arquivos |
 | Oráculo independente | WAV de referência gerado pelo mesmo FFmpeg fixado, não pela implementação sob teste | comparação SNR contra fonte externa |
 
 ## DoD — pronto para review
