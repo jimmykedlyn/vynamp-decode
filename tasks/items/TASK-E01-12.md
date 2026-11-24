@@ -9,13 +9,13 @@
 | ID | `TASK-E01-12` |
 | Módulo dono | `vynamp-decode` |
 | Repo | `jimmykedlyn/vynamp-decode` |
-| REQ coberto | `REQ-E01-07` (sub-requisito `DECODE-REQ-46b`) |
-| Critérios da spec | pendente — `specs/decode.md` §5 (`DECODE-AC-38`) |
+| REQ coberto | `REQ-E01-12` (sub-requisito `DECODE-REQ-46-VORBIS` em `specs/formatos.md` §4) |
+| Critérios da spec | `specs/formatos.md` §5 — `DECODE-AC-55` (autorado, não aprovado) |
 | Fase | M2 |
 | Prioridade | P1 |
 | Estado | planned |
 | Depende de | `TASK-E01-04` |
-| Bloqueia | `TASK-E01-07` |
+| Bloqueia | `TASK-E01-07`, `TASK-E01-13`, `TASK-E01-14` |
 | Modelo executor | Opus — áudio/RT, concorrência, segurança ou release |
 | Esforço | 2–5 dias úteis |
 | Risco | médio |
@@ -41,13 +41,13 @@ Demuxer Ogg e adapter Vorbis.
 
 | ID | Given | When | Then |
 |---|---|---|---|
-| `TASK-E01-12-AC-1` | um Vorbis em Ogg gerado pelo FFmpeg fixado (`-c:a libvorbis`), listado no `MANIFEST.txt` com sha256, taxa, canais e frames, mais o decode de referência produzido pelo mesmo FFmpeg (`ffmpeg -i in.ogg -f wav ref.wav`) | o arquivo é decodificado e o PCM é comparado contra o WAV de referência | SNR >= 90 dB contra a referência (tolerância explícita para lossy); `frames()` devolve a contagem bruta do manifesto; seek para o frame da metade cai no slice esperado |
+| `TASK-E01-12-AC-1` | um Vorbis em Ogg em `tests/fixtures/modern/vorbis/`, gerado pelo FFmpeg fixado (`-c:a libvorbis`), listado no `MANIFEST.txt` do diretório com sha256, taxa, canais e frames, mais o decode de referência produzido pelo mesmo FFmpeg (`ffmpeg -i in.ogg -f wav ref.wav`) | o arquivo é decodificado e o PCM é comparado contra o WAV de referência | SNR >= 90 dB contra a referência (tolerância explícita para lossy); `frames()` devolve a contagem bruta do manifesto; seek para o frame da metade cai no slice esperado |
 
 ## Verificação
 
 | Item | Comando / fixture | Evidência esperada |
 |---|---|---|
-| Teste automatizado | `cargo test -p vynamp-decode --test modern_profiles --locked` | verde no CI Gate |
+| Teste automatizado | `cargo test -p vynamp-decode --test ogg_vorbis --locked` (arquivo `crates/vynamp-decode/tests/ogg_vorbis.rs`, só desta TASK) | verde no CI Gate |
 | Oráculo independente | WAV de referência gerado pelo mesmo FFmpeg fixado, não pela implementação sob teste | comparação SNR contra fonte externa |
 
 ## DoD — pronto para review

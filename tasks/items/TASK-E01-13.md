@@ -9,12 +9,12 @@
 | ID | `TASK-E01-13` |
 | Módulo dono | `vynamp-decode` |
 | Repo | `jimmykedlyn/vynamp-decode` |
-| REQ coberto | `REQ-E01-07` (sub-requisito `DECODE-REQ-46c`) |
-| Critérios da spec | pendente — `specs/decode.md` §5 (`DECODE-AC-39`) |
+| REQ coberto | `REQ-E01-13` (sub-requisito `DECODE-REQ-46-OPUS-CELT` em `specs/formatos.md` §4) |
+| Critérios da spec | `specs/formatos.md` §5 — `DECODE-AC-56` (autorado, não aprovado) |
 | Fase | M2 |
 | Prioridade | P1 |
 | Estado | planned |
-| Depende de | `TASK-E01-04` |
+| Depende de | `TASK-E01-04`, `TASK-E01-12` |
 | Bloqueia | `TASK-E01-07`, `TASK-E01-14` |
 | Modelo executor | Opus — áudio/RT, concorrência, segurança ou release |
 | Esforço | 2–5 dias úteis |
@@ -26,10 +26,10 @@ Adapter Opus CELT-only fullband em Ogg.
 
 ## Boundary
 
-- **Não** cobre Opus SILK nem modo híbrido. Estes são `TASK-E01-14`, que depende desta TASK para compartilhar o demuxer Ogg e a infraestrutura de Opus, mas tem critério próprio (`DECODE-AC-40`).
+- **Não** cobre Opus SILK nem modo híbrido. Estes são `TASK-E01-14`, que depende desta TASK para compartilhar a infraestrutura de Opus, mas tem critério próprio (`DECODE-AC-57`).
 - **Não** define política de pre-skip, end trim ou output gain. Estes são `TASK-E17-02`; aqui o adapter só reporta o que o container declara e a contagem de frames é bruta (antes de pre-skip).
 - **Não** faz encoding. A regra de não anunciar encoding é `DECODE-REQ-59`. Nenhuma TASK do backlog é dona disso: a autoridade é a spec do módulo em `specs/formatos.md`, que fixa a regra do `DECODE-REQ-59`.
-- **Não** implementa o demuxer Ogg. O demuxer é entregue por `TASK-E01-12` (Vorbis) e compartilhado; esta TASK só registra o codec Opus CELT.
+- **Não** implementa o demuxer Ogg. O demuxer é entregue por `TASK-E01-12` (Vorbis), de que esta TASK depende, e compartilhado; esta TASK só registra o codec Opus CELT.
 
 ## Antes de começar
 
@@ -42,13 +42,13 @@ Adapter Opus CELT-only fullband em Ogg.
 
 | ID | Given | When | Then |
 |---|---|---|---|
-| `TASK-E01-13-AC-1` | um Opus CELT-only fullband em Ogg gerado pelo FFmpeg fixado (`-c:a libopus -application audio`), listado no `MANIFEST.txt` com sha256, taxa, canais e frames, mais o decode de referência produzido pelo mesmo FFmpeg | o arquivo é decodificado e o PCM é comparado contra o WAV de referência | SNR >= 90 dB contra a referência (tolerância explícita para lossy); `frames()` devolve a contagem bruta do manifesto (antes de pre-skip); seek para o frame da metade cai no slice esperado |
+| `TASK-E01-13-AC-1` | um Opus CELT-only fullband em Ogg em `tests/fixtures/modern/opus-celt/`, gerado pelo FFmpeg fixado (`-c:a libopus -application audio`), listado no `MANIFEST.txt` do diretório com sha256, taxa, canais e frames, mais o decode de referência produzido pelo mesmo FFmpeg | o arquivo é decodificado e o PCM é comparado contra o WAV de referência | SNR >= 90 dB contra a referência (tolerância explícita para lossy); `frames()` devolve a contagem bruta do manifesto (antes de pre-skip); seek para o frame da metade cai no slice esperado |
 
 ## Verificação
 
 | Item | Comando / fixture | Evidência esperada |
 |---|---|---|
-| Teste automatizado | `cargo test -p vynamp-decode --test modern_profiles --locked` | verde no CI Gate |
+| Teste automatizado | `cargo test -p vynamp-decode --test opus_celt --locked` (arquivo `crates/vynamp-decode/tests/opus_celt.rs`, só desta TASK) | verde no CI Gate |
 | Oráculo independente | WAV de referência gerado pelo mesmo FFmpeg fixado, não pela implementação sob teste | comparação SNR contra fonte externa |
 
 ## DoD — pronto para review

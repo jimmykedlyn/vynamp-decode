@@ -9,8 +9,8 @@
 | ID | `TASK-E01-11` |
 | Módulo dono | `vynamp-decode` |
 | Repo | `jimmykedlyn/vynamp-decode` |
-| REQ coberto | `REQ-E01-07` (sub-requisito `DECODE-REQ-46a`) |
-| Critérios da spec | pendente — `specs/decode.md` §5 (`DECODE-AC-36`, `DECODE-AC-37`) |
+| REQ coberto | `REQ-E01-11` (sub-requisito `DECODE-REQ-46-MP4` em `specs/formatos.md` §4) |
+| Critérios da spec | `specs/formatos.md` §5 — `DECODE-AC-53`, `DECODE-AC-54` (autorados, não aprovados) |
 | Fase | M2 |
 | Prioridade | P1 |
 | Estado | planned |
@@ -42,14 +42,14 @@ Demuxer MP4, adapter ALAC lossless e leitura de capítulos M4B.
 
 | ID | Given | When | Then |
 |---|---|---|---|
-| `TASK-E01-11-AC-1` | um ALAC em MP4 gerado pelo FFmpeg fixado (`-c:a alac`) e o PCM de origem usado para produzi-lo, ambos listados no `MANIFEST.txt` com sha256 e frame count | o arquivo é aberto por `vynamp_decode::open_path` e decodificado até o fim; o PCM resultante é comparado amostra a amostra contra o PCM de origem | o PCM decodificado é bit-exato ao da origem; `frames()` devolve a contagem bruta do manifesto (antes de trim); um seek para o frame da metade seguido de leitura até `Ok(false)` cai no mesmo slice do decode linear |
-| `TASK-E01-11-AC-2` | um M4B gerado pelo FFmpeg fixado (`-f ipod -map_metadata`) com um capítulo declarado via FFMETADATA, listado no `MANIFEST.txt` | o arquivo é aberto e os capítulos são enumerados pela API pública | a lista de capítulos (título + timestamp) é igual à do FFMETADATA de origem; `frames()` devolve a contagem bruta do manifesto; seek para o frame da metade cai no slice esperado |
+| `TASK-E01-11-AC-1` | um ALAC em MP4 em `tests/fixtures/modern/alac/`, gerado pelo FFmpeg fixado (`-c:a alac`), e o PCM de origem usado para produzi-lo, ambos no `MANIFEST.txt` do diretório com sha256 e frame count | o arquivo é aberto por `vynamp_decode::open_path` e decodificado até o fim; o PCM resultante é comparado amostra a amostra contra o PCM de origem | o PCM decodificado é bit-exato ao da origem; `frames()` devolve a contagem bruta do manifesto (antes de trim); um seek para o frame da metade seguido de leitura até `Ok(false)` cai no mesmo slice do decode linear |
+| `TASK-E01-11-AC-2` | um M4B em `tests/fixtures/modern/alac/`, gerado pelo FFmpeg fixado (`-f ipod -map_metadata`) com um capítulo declarado via FFMETADATA, listado no `MANIFEST.txt` do diretório | o arquivo é aberto e os capítulos são enumerados pela API pública | a lista de capítulos (título + timestamp) é igual à do FFMETADATA de origem; `frames()` devolve a contagem bruta do manifesto; seek para o frame da metade cai no slice esperado |
 
 ## Verificação
 
 | Item | Comando / fixture | Evidência esperada |
 |---|---|---|
-| Teste automatizado | `cargo test -p vynamp-decode --test modern_profiles --locked` | verde no CI Gate |
+| Teste automatizado | `cargo test -p vynamp-decode --test mp4_alac --locked` (arquivo `crates/vynamp-decode/tests/mp4_alac.rs`, só desta TASK) | verde no CI Gate |
 | Oráculo independente | PCM de origem gerado antes do ALAC; FFMETADATA de origem preservado como fixture | comparação bit-exata e enumeração de capítulos contra fonte, não contra espelho da implementação |
 
 ## DoD — pronto para review

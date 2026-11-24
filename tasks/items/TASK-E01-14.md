@@ -9,12 +9,12 @@
 | ID | `TASK-E01-14` |
 | Módulo dono | `vynamp-decode` |
 | Repo | `jimmykedlyn/vynamp-decode` |
-| REQ coberto | `REQ-E01-07` (sub-requisito `DECODE-REQ-46d`) |
-| Critérios da spec | pendente — `specs/decode.md` §5 (`DECODE-AC-40`) |
+| REQ coberto | `REQ-E01-14` (sub-requisito `DECODE-REQ-46-OPUS-SILK` em `specs/formatos.md` §4) |
+| Critérios da spec | `specs/formatos.md` §5 — `DECODE-AC-57` (autorado, não aprovado) |
 | Fase | M2 |
 | Prioridade | P1 |
 | Estado | planned |
-| Depende de | `TASK-E01-04`, `TASK-E01-13` |
+| Depende de | `TASK-E01-04`, `TASK-E01-12`, `TASK-E01-13` |
 | Bloqueia | `TASK-E01-07` |
 | Modelo executor | Opus — áudio/RT, concorrência, segurança ou release |
 | Esforço | 2–5 dias úteis |
@@ -26,10 +26,10 @@ Adapter Opus SILK e modo híbrido em Ogg.
 
 ## Boundary
 
-- **Não** cobre Opus CELT-only fullband. Este é `TASK-E01-13`, que esta TASK depende para compartilhar a infraestrutura de Opus e o demuxer Ogg.
+- **Não** cobre Opus CELT-only fullband. Este é `TASK-E01-13`, de que esta TASK depende para compartilhar a infraestrutura de Opus.
 - **Não** define política de pre-skip, end trim ou output gain. Estes são `TASK-E17-02`; aqui o adapter só reporta o que o container declara e a contagem de frames é bruta (antes de pre-skip).
 - **Não** faz encoding. A regra de não anunciar encoding é `DECODE-REQ-59`. Nenhuma TASK do backlog é dona disso: a autoridade é a spec do módulo em `specs/formatos.md`, que fixa a regra do `DECODE-REQ-59`.
-- **Não** implementa o demuxer Ogg. O demuxer é entregue por `TASK-E01-12` (Vorbis) e compartilhado; esta TASK só registra os modos SILK e híbrido do codec Opus.
+- **Não** implementa o demuxer Ogg. O demuxer é entregue por `TASK-E01-12` (Vorbis), de que esta TASK depende, e compartilhado; esta TASK só registra os modos SILK e híbrido do codec Opus.
 
 ## Antes de começar
 
@@ -42,14 +42,14 @@ Adapter Opus SILK e modo híbrido em Ogg.
 
 | ID | Given | When | Then |
 |---|---|---|---|
-| `TASK-E01-14-AC-1` | um Opus SILK e um Opus híbrido em Ogg gerados pelo FFmpeg fixado (`-c:a libopus -application voip` para SILK, `-application audio` com taxa <= 16 kHz para híbrido), cada um com decode de referência do mesmo FFmpeg | cada arquivo é decodificado e o PCM é comparado contra o WAV de referência correspondente | SNR >= 80 dB contra a referência (tolerância explícita, menor que CELT pelo codec); `frames()` devolve a contagem bruta do manifesto; seek para o frame da metade cai no slice esperado |
+| `TASK-E01-14-AC-1` | um Opus SILK-only e um Opus híbrido em Ogg em `tests/fixtures/modern/opus-silk/`, gerados pelo FFmpeg fixado a partir de uma origem mono de banda larga (ruído rosa de 5 s modulado em amplitude a 4 Hz, `anoisesrc=color=pink:amplitude=0.3:duration=5:sample_rate=48000,volume='0.5+0.5*sin(2*PI*4*t)':eval=frame`; um tom puro não serve, porque o libopus troca para CELT): o SILK-only da origem reamostrada para 16 kHz com `-c:a libopus -application voip -b:a 16k`, o híbrido da origem a 48 kHz com `-c:a libopus -application voip -b:a 24k` (fullband, bitrate baixo); cada um listado no `MANIFEST.txt` do diretório com sha256, taxa, canais e frames, e com decode de referência do mesmo FFmpeg | o byte de TOC de cada pacote de áudio dos dois arquivos é lido do Ogg (RFC 6716 §3.1, os 5 bits altos dão o config), e depois cada arquivo é decodificado e o PCM é comparado contra o WAV de referência correspondente | todo pacote do arquivo SILK-only tem config de TOC entre 0 e 11 e todo pacote do arquivo híbrido tem config de TOC entre 12 e 15; SNR >= 80 dB contra a referência (tolerância explícita, menor que CELT pelo codec); `frames()` devolve a contagem bruta do manifesto; seek para o frame da metade cai no slice esperado |
 
 ## Verificação
 
 | Item | Comando / fixture | Evidência esperada |
 |---|---|---|
-| Teste automatizado | `cargo test -p vynamp-decode --test modern_profiles --locked` | verde no CI Gate |
-| Oráculo independente | WAV de referência gerado pelo mesmo FFmpeg fixado, não pela implementação sob teste | comparação SNR contra fonte externa |
+| Teste automatizado | `cargo test -p vynamp-decode --test opus_silk_hybrid --locked` (arquivo `crates/vynamp-decode/tests/opus_silk_hybrid.rs`, só desta TASK) | verde no CI Gate |
+| Oráculo independente | WAV de referência gerado pelo mesmo FFmpeg fixado, não pela implementação sob teste; o modo de cada pacote é lido do TOC (RFC 6716 §3.1), não do que o adapter diz ter decodificado | comparação SNR contra fonte externa e contagem de config de TOC por arquivo; sem o TOC, um híbrido que saiu SILK-only passaria pelo mesmo SNR |
 
 ## DoD — pronto para review
 
