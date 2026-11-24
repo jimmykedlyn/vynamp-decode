@@ -12,7 +12,7 @@
 | REQ coberto | `REQ-E12-05` |
 | Critérios da spec | pendente — `specs/decode.md` §5 |
 | Fase | M5 |
-| Prioridade | P2 |
+| Prioridade | P1 |
 | Estado | planned |
 | Depende de | `TASK-E01-08`, `TASK-E07-05` |
 | Bloqueia | `TASK-E17-17`, `TASK-E17-18` |
