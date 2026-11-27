@@ -1,8 +1,8 @@
 //! Gapless-aware reader over the first track of a container.
 
 use vynamp_decode_core::{
-    AudioBuffer, CancelToken, Decoder, Demuxer, Error, Event, Options, Packet, Registry, Result,
-    Source, Track,
+    AudioBuffer, CancelToken, Chapter, Decoder, Demuxer, Error, Event, Options, Packet, Registry,
+    Result, Source, Track,
 };
 
 /// Capacity of the diagnostic event queue.
@@ -95,6 +95,14 @@ impl Reader {
     /// The track being decoded.
     pub fn track(&self) -> &Track {
         &self.track
+    }
+
+    /// Chapter marks the container declares, in start order (empty if none).
+    ///
+    /// `Chapter::start_frame` is on the container's timeline, at the track's sample rate,
+    /// before any delay trim; the reader does not seek by chapter.
+    pub fn chapters(&self) -> &[Chapter] {
+        self.demuxer.chapters()
     }
 
     /// Length of the trimmed output in frames (declared frames minus delay and

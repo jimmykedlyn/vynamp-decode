@@ -16,6 +16,8 @@ pub enum CodecId {
     Mp2,
     /// MPEG-1 Audio Layer III.
     Mp3,
+    /// Apple Lossless (ALAC); `Track::codec_private` holds the `ALACSpecificConfig`.
+    Alac,
 }
 
 /// How reliable a track's `delay`, `padding` and `frames` are.
@@ -52,4 +54,14 @@ pub struct Track {
     pub gapless: GaplessKind,
     /// Codec-specific setup data.
     pub codec_private: Vec<u8>,
+}
+
+/// A chapter mark declared by the container.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Chapter {
+    /// Chapter title (UTF-8; may be empty).
+    pub title: String,
+    /// First frame of the chapter, at the track's sample rate, on the container's
+    /// (untrimmed) timeline.
+    pub start_frame: u64,
 }
