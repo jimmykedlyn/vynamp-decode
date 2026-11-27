@@ -302,3 +302,31 @@ fn an_unknown_element_tag_is_invalid_and_resilient_silence() {
     d.drain_events(&mut ev);
     assert_eq!(ev.len(), 1, "{ev:?}");
 }
+
+#[test]
+fn a_compressed_count_beyond_what_the_packet_can_encode_is_rejected() {
+    // A 64-byte compressed frame declaring 16M samples. Its residuals cannot cover more
+    // than 65536 samples per 26 bits (a 1-bit residual plus a 25-bit escaped zero run):
+    // about 1.07M in the ~425 bits left, so the count is rejected before the buffers are
+    // sized by it. The former bound (65536 per bit, ~27.8M) let it through.
+    let mut cfg = config(16, 1);
+    cfg[..4].copy_from_slice(&(4096u32 * 4096).to_be_bytes());
+    let mut d = AlacDecoder::new(&track(cfg, 1), &Options::default()).expect("decoder");
+    let mut w = W::default();
+    element_header(&mut w, 0, 4096 * 4096, true);
+    w.put(8, 0); // shift
+    w.put(8, 0); // weight
+    w.put(4, 0); // mode
+    w.put(4, 9); // quant
+    w.put(3, 4); // mult
+    w.put(5, 0); // order
+    while w.out.len() < 64 {
+        w.put(8, 0);
+    }
+    w.put(3, 7);
+    assert!(w.out.len() >= 64);
+    expect_invalid(
+        d.decode(&packet(w.out, 1), &mut AudioBuffer::new()),
+        "alac frame size",
+    );
+}

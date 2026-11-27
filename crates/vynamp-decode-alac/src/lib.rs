@@ -24,9 +24,17 @@ const TAG_SCE: u32 = 0;
 const TAG_CPE: u32 = 1;
 const TAG_LFE: u32 = 3;
 const TAG_END: u32 = 7;
-/// Most samples one rice step can cover: the sample plus a zero run of at most 65535
-/// (a 16-bit escape; non-escaped runs are shorter). Each step reads at least one bit.
-const MAX_SAMPLES_PER_RICE_BIT: u64 = 65_536;
+/// Upper bound on the residuals one bit of a compressed channel can cover.
+///
+/// Each step of `rice` decodes one residual (at least 1 bit) and, while the history is
+/// below 128, a zero run. A run read without escape has `x <= 8` and a parameter
+/// `k = 7 - log2(h) + ((h + 16) >> 6) <= 7` for `h < 128`, so it covers at most
+/// `8 * 127 + 126 = 1142` samples, reading at least `x + 1` unary bits and `k - 1` more:
+/// under 80 samples per bit. Only the escape (nine `1` bits then a 16-bit length) reaches
+/// 65535: a step then covers at most 1 + 65535 samples for at least 1 + 9 + 16 = 26 bits.
+/// The densest step is therefore 65536 / 26 < 2521 samples per bit, and a valid channel of
+/// `s` samples needs at least `s / 2521` bits.
+const MAX_SAMPLES_PER_RICE_BIT: u64 = 2521;
 
 fn invalid(what: &'static str, offset: u64) -> Error {
     Error::Invalid { what, offset }
@@ -384,9 +392,10 @@ impl AlacDecoder {
         }
         // Bound the declared count by what the rest of the packet can encode before
         // sizing the per-channel buffers by it: verbatim samples take `bit_depth` bits
-        // each, compressed ones at least one bit per rice step.
+        // each; each compressed channel needs its own residual bits, at most
+        // `MAX_SAMPLES_PER_RICE_BIT` samples per bit.
         let fits = if compressed {
-            u64::from(samples) <= b.left().saturating_mul(MAX_SAMPLES_PER_RICE_BIT)
+            u64::from(samples) * n as u64 <= b.left().saturating_mul(MAX_SAMPLES_PER_RICE_BIT)
         } else {
             u64::from(samples) * n as u64 * u64::from(cfg.bit_depth) <= b.left()
         };
