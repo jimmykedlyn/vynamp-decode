@@ -33,6 +33,6 @@ pub use registry::{
 };
 pub use sample::{Endian, PcmEncoding, PcmSpec, SampleFormat};
 pub use source::{FileSource, SliceSource, Source, VecSource};
-pub use track::{CodecId, GaplessKind, Track};
+pub use track::{Chapter, CodecId, GaplessKind, Track};
 pub use trailer::{Trailer, TrailerKind, find_trailers};
 pub use traits::{Decoder, Demuxer, SeekTo};

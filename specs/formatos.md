@@ -3,7 +3,7 @@
 | Campo | Valor |
 |---|---|
 | Módulo | `vynamp-decode` |
-| Crate(s) | `vynamp-decode-riff`, `vynamp-decode-aiff`, `vynamp-decode-pcm`, `vynamp-decode-flac`, `vynamp-decode-mpa`, `vynamp-decode-mp3` |
+| Crate(s) | `vynamp-decode-riff`, `vynamp-decode-aiff`, `vynamp-decode-pcm`, `vynamp-decode-flac`, `vynamp-decode-mpa`, `vynamp-decode-mp3`, `vynamp-decode-mp4`, `vynamp-decode-alac` |
 | Tipo | lib |
 | Versão da spec | 0.2.0 |
 | Data | 2026-11-11 |
@@ -44,6 +44,8 @@ uma sonda de bytes, um demuxer e uma função `open_*` que o registro usa.
 | `vynamp-decode-flac` | `probe_flac(&[u8]) -> u8` | `FlacDemuxer` (`stream_info()`, `seek_points()`, `metadata_blocks()`, `first_frame_offset()`), `open_flac` | `FlacDecoder::new` / `FlacDecoder::with_options` | `StreamInfo`, `SeekPoint`, `BlockKind`, `RawBlock`, `ChannelAssignment`, `FrameHeader` |
 | `vynamp-decode-mpa` | `probe_mpa(&[u8]) -> u8` | `MpaDemuxer` (`vbr_info()`, `free_format_len()`, `first_frame_offset()`, `uses_cbr_index()`), `open_mpa` | — (o decoder vive em `-mp3`) | `parse_header([u8; 4]) -> Option<FrameHeader>`, `FrameHeader`, `MpegVersion`, `ChannelMode`, `parse_vbr`, `VbrInfo`, `VbrKind`, `LameInfo` |
 | `vynamp-decode-mp3` | — | — | `MpegDecoder::new(&Track, &Options)` (Layer I, II e III) | — |
+| `vynamp-decode-mp4` | `probe_mp4(&[u8]) -> u8` (box `ftyp` no início) | `Mp4Demuxer` (capítulos por `Demuxer::chapters`), `open_mp4(Box<dyn Source>, &Options)` | — (o decoder vive em `-alac`) | — |
+| `vynamp-decode-alac` | — | — | `AlacDecoder::new(&Track, &Options)` (16 e 24 bits, mono e estéreo; `codec_private` = `ALACSpecificConfig`) | — |
 
 Contratos fixados por esta spec:
 
@@ -52,7 +54,7 @@ Contratos fixados por esta spec:
   extensão do arquivo.
 - **Pacote PCM.** RIFF e AIFF emitem pacotes de no máximo `PACKET_FRAMES` quadros;
   quadro parcial no fim do dado é descartado, não preenchido.
-- **Identidade de codec.** `CodecId` cobre hoje `Pcm`, `Flac`, `Mp1`, `Mp2`, `Mp3`. Um
+- **Identidade de codec.** `CodecId` cobre hoje `Pcm`, `Flac`, `Mp1`, `Mp2`, `Mp3`, `Alac`. Um
   codec novo entra como variante nova, com spec e teste no mesmo PR.
 - **Grau de verificação.** Cada formato declara `Verification` (`Conformance`,
   `Oracle` ou `Experimental`) no registro (`specs/registro-capacidades.md`).
@@ -79,13 +81,13 @@ Formatos implementados (provados por teste hoje):
 | DECODE-REQ-43 | Medir streams *free format* e manter a busca exata quando o cabeçalho Info mente | REQ-E01-04 | TASK-E01-04 | `mpa/demux.rs::free_format_streams_are_measured`, `seeks_stay_exact_when_the_info_header_lies` |
 | DECODE-REQ-44 | Decodificar MP2 e MP3 dentro do critério ISO de precisão total | REQ-E01-04 | TASK-E01-04 | `mp2.rs::matches_ffmpeg_under_the_iso_full_accuracy_criterion`, `mp3.rs::matches_ffmpeg_under_the_iso_full_accuracy_criterion` |
 | DECODE-REQ-45 | Decodificar MP3 Layer III sem alocar por quadro | REQ-E01-04 | TASK-E01-04 | `mp3/alloc.rs::layer_three_decoding_does_not_allocate` |
+| DECODE-REQ-46-MP4 | Demuxer MP4, ALAC lossless em MP4 e leitura de capítulos de M4B | REQ-E01-11 | TASK-E01-11 | `mp4_alac.rs::alac_in_mp4_decodes_bit_exact_to_its_source` (`DECODE-AC-53`), `mp4_alac.rs::m4b_chapters_match_their_ffmetadata` (`DECODE-AC-54`); unitários em `vynamp-decode-mp4/tests/demux.rs` e `vynamp-decode-alac/tests/decode.rs` |
 
 Formatos planejados (sem teste; nenhum entra no registro antes do teste):
 
 | ID | Requisito | REQ de produto | TASK | Onde é provado |
 |---|---|---|---|---|
 | DECODE-REQ-46-AAC | AAC-LC em MP4 e ADTS; HE-AAC nunca anunciado como AAC-LC | REQ-E01-07 | TASK-E01-07 | planned, sem teste (`DECODE-AC-34`, `DECODE-AC-35` em `specs/decode.md`) |
-| DECODE-REQ-46-MP4 | Demuxer MP4, ALAC lossless em MP4 e leitura de capítulos de M4B | REQ-E01-11 | TASK-E01-11 | planned, sem teste (`DECODE-AC-53`, `DECODE-AC-54`) |
 | DECODE-REQ-46-VORBIS | Demuxer Ogg e Vorbis em Ogg | REQ-E01-12 | TASK-E01-12 | planned, sem teste (`DECODE-AC-55`) |
 | DECODE-REQ-46-OPUS-CELT | Opus CELT-only fullband em Ogg, sobre o demuxer Ogg de `DECODE-REQ-46-VORBIS` | REQ-E01-13 | TASK-E01-13 | planned, sem teste (`DECODE-AC-56`) |
 | DECODE-REQ-46-OPUS-SILK | Opus SILK-only e híbrido (SILK+CELT) em Ogg, sobre o demuxer Ogg de `DECODE-REQ-46-VORBIS` | REQ-E01-14 | TASK-E01-14 | planned, sem teste (`DECODE-AC-57`) |
@@ -205,7 +207,10 @@ Depende de: `vynamp-dsp` (opcional, feature `resample`)
 
 | Limitação | Consequência | Quem cobre |
 |---|---|---|
-| Só PCM (WAV/RF64/Wave64/AIFF), FLAC nativo e MPEG Layer I/II/III estão implementados | AAC, ALAC, Vorbis, Opus e todo o resto do catálogo de `reference/audio/02-formats.md` não tocam | TASK-E01-07 (AAC), E01-11 (MP4/ALAC/M4B), E01-12 (Ogg/Vorbis), E01-13 e E01-14 (Opus), E01-08, E17-03..05, E17-13..17 |
+| Só PCM (WAV/RF64/Wave64/AIFF), FLAC nativo, MPEG Layer I/II/III e ALAC em MP4 estão implementados | AAC, Vorbis, Opus e todo o resto do catálogo de `reference/audio/02-formats.md` não tocam | TASK-E01-07 (AAC), E01-12 (Ogg/Vorbis), E01-13 e E01-14 (Opus), E01-08, E17-03..05, E17-13..17 |
+| MP4 só com ALAC | outra entrada de amostra (AAC `mp4a` incluso) é `Unsupported("mp4 codec")`; só a primeira trilha de áudio é exposta; `mdhd` com timescale diferente da taxa do ALAC é `Unsupported("mp4 timescale")` | TASK-E01-07 (AAC), TASK-E17-03 (seleção de faixa) |
+| Edit list do MP4 não é aplicada | `delay` e `padding` ficam 0; uma `elst` que não é identidade deixa `gapless` como `Unknown`, em vez de cortar o que o contêiner declara | sem TASK (fora do escopo da TASK-E01-11) |
+| Capítulo de M4B: `chpl` tem precedência sobre a trilha de texto | o FFmpeg (`-f ipod`) grava os dois, mas ancora em 0 o primeiro capítulo da trilha de texto (`tref/chap`); só o `udta/chpl` guarda o `START` declarado. A trilha de texto é usada só sem `chpl`. Capítulos são só leitura: sem escrita e sem seek por capítulo | por desenho (TASK-E01-11) |
 | `channel_mask` é lido mas não vira mapa de canais | arquivo multicanal sai na ordem do arquivo | TASK-E01-09 |
 | Sem DSD, MIDI, tracker nem CD | esses arquivos são rejeitados com `Unsupported` | TASK-E01-09, E12-05, E12-06 |
 | Sem leitura de metadata, CUE ou capa (C12) | tags são puladas, não expostas | fora deste módulo (§7) |

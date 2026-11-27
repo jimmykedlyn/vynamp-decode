@@ -65,7 +65,7 @@ trata as tags por conta própria. Nada pontuou: `Unsupported("container")`.
 
 | Item | Contrato |
 |---|---|
-| `default_registry() -> Registry` | registra os descritores habilitados por feature, nesta ordem: containers `riff`, `aiff`, `flac`, `mpa`; codecs `pcm`, `flac`, `mpeg-audio`, `mpeg-audio-layer1` |
+| `default_registry() -> Registry` | registra os descritores habilitados por feature, nesta ordem: containers `riff`, `aiff`, `flac`, `mpa`, `mp4`; codecs `pcm`, `flac`, `mpeg-audio`, `mpeg-audio-layer1`, `alac` |
 | `open(Box<dyn Source>, Options) -> Result<Reader>` | `Reader::open_with(&default_registry(), src, opts, None)` — sem dica de extensão |
 | `open_path(&Path, Options) -> Result<Reader>` | abre o arquivo e passa a extensão como `hint_ext` |
 | `Reader::open_with(&Registry, src, opts, hint_ext)` | probe → `open` do container → `codec_for(track.codec)`; sem codec: `Unsupported("codec")` |
@@ -78,12 +78,14 @@ Descritores embutidos e o nível que cada um declara:
 | `aiff` | container | `aiff` | aif, aiff, aifc | `Oracle` | idem |
 | `flac` | container | `flac` | flac, fla | `Conformance` | IETF flac-test-files |
 | `mpa` | container | `mpa` | mp3, mp2, mp1, mpa | `Oracle` | FFmpeg |
+| `mp4` | container | `mp4` | m4a, m4b, mp4 | `Oracle` | PCM de origem do FFmpeg (`mp4_alac.rs`) |
 | `pcm` | codec | `pcm` | `Pcm(_)` | `Oracle` | sem suíte oficial |
 | `flac` | codec | `flac` | `Flac` | `Conformance` | IETF flac-test-files |
 | `mpeg-audio` | codec | `mp3` | `Mp2`, `Mp3` | `Oracle` | FFmpeg mp2float/mp3float, critério ISO/IEC 11172-4; os streams ISO não são redistribuíveis |
 | `mpeg-audio-layer1` | codec | `mp3` | `Mp1` | `Experimental` | não há encoder Layer I no FFmpeg nem fixture real |
+| `alac` | codec | `alac` | `Alac` | `Oracle` | bit-exato contra o PCM que o FFmpeg codificou (`mp4_alac.rs`) |
 
-Features default: `riff`, `aiff`, `pcm`, `flac`, `mpa`, `mp3`.
+Features default: `riff`, `aiff`, `pcm`, `flac`, `mpa`, `mp3`, `mp4`, `alac`.
 
 ## 4. Requisitos
 

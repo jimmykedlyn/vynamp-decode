@@ -827,11 +827,16 @@ fn codec_lookup() {
         );
     }
     assert_eq!(
+        reg.codec_for(&CodecId::Alac).is_some(),
+        cfg!(feature = "alac")
+    );
+    assert_eq!(
         reg.containers().count(),
         usize::from(cfg!(feature = "riff"))
             + usize::from(cfg!(feature = "aiff"))
             + usize::from(cfg!(feature = "flac"))
             + usize::from(cfg!(feature = "mpa"))
+            + usize::from(cfg!(feature = "mp4"))
     );
 }
 
@@ -890,6 +895,9 @@ fn registry_enumerates_names_extensions_and_verification() {
     if cfg!(feature = "mpa") {
         want_containers.push("mpa");
     }
+    if cfg!(feature = "mp4") {
+        want_containers.push("mp4");
+    }
     let mut want_codecs: Vec<&str> = Vec::new();
     if cfg!(feature = "pcm") {
         want_codecs.push("pcm");
@@ -900,6 +908,9 @@ fn registry_enumerates_names_extensions_and_verification() {
     if cfg!(feature = "mp3") {
         want_codecs.push("mpeg-audio");
         want_codecs.push("mpeg-audio-layer1");
+    }
+    if cfg!(feature = "alac") {
+        want_codecs.push("alac");
     }
 
     assert_eq!(

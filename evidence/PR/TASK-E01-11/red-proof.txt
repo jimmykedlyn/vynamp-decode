@@ -1,0 +1,182 @@
+# TASK-E01-11 — prova do vermelho
+# base 2f4dd8a + fixtures (308ceaf) + teste mp4_alac.rs + acréscimos de API no core (CodecId::Alac, Chapter, Demuxer::chapters, Reader::chapters)
+# features mp4/alac declaradas, sem crate de container/codec registrado
+$ cargo test -p vynamp-decode --test mp4_alac --locked
+
+running 2 tests
+test m4b_chapters_match_their_ffmetadata ... FAILED
+test alac_in_mp4_decodes_bit_exact_to_its_source ... FAILED
+
+failures:
+
+---- m4b_chapters_match_their_ffmetadata stdout ----
+
+thread 'm4b_chapters_match_their_ffmetadata' panicked at crates\vynamp-decode\tests\mp4_alac.rs:231:31:
+alac-s16-chapters.m4b: unsupported: container
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- alac_in_mp4_decodes_bit_exact_to_its_source stdout ----
+
+thread 'alac_in_mp4_decodes_bit_exact_to_its_source' panicked at crates\vynamp-decode\tests\mp4_alac.rs:144:35:
+alac-s16.m4a: unsupported: container
+
+
+failures:
+    alac_in_mp4_decodes_bit_exact_to_its_source
+    m4b_chapters_match_their_ffmetadata
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+
+# crates/vynamp-decode-mp4/tests/demux.rs contra um stub que compila e não faz nada
+# (probe_mp4 -> 0, open_mp4 -> Err(Unsupported("container")))
+$ cargo test -p vynamp-decode-mp4 --test demux
+running 17 tests
+test a_length_beyond_max_frames_is_a_limit_error ... FAILED
+test a_non_identity_edit_list_makes_gapless_unknown ... FAILED
+test a_non_alac_sample_entry_is_unsupported ... FAILED
+test a_box_smaller_than_its_header_is_invalid ... FAILED
+test chpl_takes_precedence_over_the_text_track ... FAILED
+test a_packet_beyond_the_end_of_the_file_is_invalid ... FAILED
+test chapters_come_from_the_text_track_named_by_tref_chap ... FAILED
+test a_file_without_moov_is_invalid ... FAILED
+test invalid_utf8_in_a_chapter_title_is_strict_invalid_and_resilient_lossy ... FAILED
+test moov_larger_than_the_metadata_limit_is_a_limit_error ... FAILED
+test no_chapters_without_tref_or_chpl ... FAILED
+test packets_follow_the_sample_tables_across_chunks ... FAILED
+test probe_needs_an_ftyp_box ... FAILED
+test seek_lands_on_the_packet_holding_the_frame ... FAILED
+test tables_that_disagree_on_the_sample_count_are_invalid ... FAILED
+test the_audio_track_is_described_from_the_sample_entry_and_tables ... FAILED
+test truncated_moov_is_a_typed_error ... FAILED
+thread 'a_length_beyond_max_frames_is_a_limit_error' (39672) panicked at crates\vynamp-decode-mp4\tests\demux.rs:382:5:
+  left: Unsupported("container")
+ right: Limit(Frames)
+thread 'a_non_identity_edit_list_makes_gapless_unknown' (93524) panicked at crates\vynamp-decode-mp4\tests\demux.rs:176:67:
+thread 'a_non_alac_sample_entry_is_unsupported' (106480) panicked at crates\vynamp-decode-mp4\tests\demux.rs:422:5:
+  left: Unsupported("container")
+ right: Unsupported("mp4 codec")
+thread 'a_box_smaller_than_its_header_is_invalid' (100372) panicked at crates\vynamp-decode-mp4\tests\demux.rs:346:5:
+thread 'chpl_takes_precedence_over_the_text_track' (105232) panicked at crates\vynamp-decode-mp4\tests\demux.rs:176:67:
+thread 'a_packet_beyond_the_end_of_the_file_is_invalid' (104964) panicked at crates\vynamp-decode-mp4\tests\demux.rs:176:67:
+thread 'chapters_come_from_the_text_track_named_by_tref_chap' (102052) panicked at crates\vynamp-decode-mp4\tests\demux.rs:176:67:
+thread 'a_file_without_moov_is_invalid' (92628) panicked at crates\vynamp-decode-mp4\tests\demux.rs:403:5:
+thread 'invalid_utf8_in_a_chapter_title_is_strict_invalid_and_resilient_lossy' (19716) panicked at crates\vynamp-decode-mp4\tests\demux.rs:434:5:
+thread 'moov_larger_than_the_metadata_limit_is_a_limit_error' (106996) panicked at crates\vynamp-decode-mp4\tests\demux.rs:367:5:
+  left: Unsupported("container")
+ right: Limit(Metadata)
+thread 'no_chapters_without_tref_or_chpl' (99460) panicked at crates\vynamp-decode-mp4\tests\demux.rs:176:67:
+thread 'packets_follow_the_sample_tables_across_chunks' (99628) panicked at crates\vynamp-decode-mp4\tests\demux.rs:176:67:
+thread 'probe_needs_an_ftyp_box' (16496) panicked at crates\vynamp-decode-mp4\tests\demux.rs:197:5:
+  left: 0
+ right: 100
+thread 'seek_lands_on_the_packet_holding_the_frame' (99284) panicked at crates\vynamp-decode-mp4\tests\demux.rs:176:67:
+thread 'tables_that_disagree_on_the_sample_count_are_invalid' (82848) panicked at crates\vynamp-decode-mp4\tests\demux.rs:395:5:
+thread 'the_audio_track_is_described_from_the_sample_entry_and_tables' (17504) panicked at crates\vynamp-decode-mp4\tests\demux.rs:176:67:
+thread 'truncated_moov_is_a_typed_error' (106592) panicked at crates\vynamp-decode-mp4\tests\demux.rs:335:9:
+test result: FAILED. 0 passed; 17 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+# crates/vynamp-decode-alac/tests/decode.rs contra um stub que compila e não faz nada
+# (AlacDecoder::new -> Ok, decode -> Ok(()) sem tocar o buffer)
+$ cargo test -p vynamp-decode-alac --test decode
+running 7 tests
+test configuration_errors_are_typed ... FAILED
+test truncated_frame_is_invalid_at_an_absolute_offset ... FAILED
+test a_frame_without_end_tag_is_invalid ... FAILED
+test resilient_turns_a_bad_frame_into_silence_and_reports_it ... FAILED
+test a_mono_element_in_a_stereo_stream_is_invalid ... FAILED
+test verbatim_mono_24_bit_frame_is_sign_extended_i24 ... FAILED
+test verbatim_stereo_16_bit_frame_decodes_to_its_samples ... FAILED
+thread 'configuration_errors_are_typed' (64252) panicked at crates\vynamp-decode-alac\tests\decode.rs:183:5:
+thread 'truncated_frame_is_invalid_at_an_absolute_offset' (90888) panicked at crates\vynamp-decode-alac\tests\decode.rs:128:18:
+thread 'a_frame_without_end_tag_is_invalid' (84312) panicked at crates\vynamp-decode-alac\tests\decode.rs:146:10:
+thread 'resilient_turns_a_bad_frame_into_silence_and_reports_it' (87204) panicked at crates\vynamp-decode-alac\tests\decode.rs:164:5:
+  left: 0
+ right: 100
+thread 'a_mono_element_in_a_stereo_stream_is_invalid' (105520) panicked at crates\vynamp-decode-alac\tests\decode.rs:155:10:
+thread 'verbatim_mono_24_bit_frame_is_sign_extended_i24' (27832) panicked at crates\vynamp-decode-alac\tests\decode.rs:116:5:
+  left: F32
+ right: I24
+thread 'verbatim_stereo_16_bit_frame_decodes_to_its_samples' (97116) panicked at crates\vynamp-decode-alac\tests\decode.rs:102:5:
+  left: F32
+ right: I16
+test result: FAILED. 0 passed; 7 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+# NOTA DE FRANQUEZA (achado 6 do revisor em 51792d9)
+# O vermelho de demux.rs (17/17) e de decode.rs (7/7) registrado acima foi produzido contra
+# stubs locais (open_mp4/probe_mp4 e AlacDecoder que compilam e não fazem nada), trocados
+# temporariamente no disco e nunca commitados. Esses testes nasceram no mesmo commit da
+# implementação, então esse vermelho NÃO é reproduzível pelo histórico. Só o vermelho de
+# AC-53/54 (mp4_alac.rs, commit c2b6c70, antes dos crates mp4/alac) é reproduzível fazendo
+# checkout daquele SHA. Os vermelhos abaixo (correções do BLOQUEADO) foram obtidos com o
+# teste novo sobre o código de 51792d9, antes da correção, e o histórico mostra o teste e a
+# correção juntos em cada commit de fix (testes rodados antes, implementação depois).
+
+# Bloqueantes 1 e 2: testes novos em demux.rs sobre o código de 51792d9
+# (stsz fixo sem len, stsc grande, stsc fora de ordem); corrigidos em 263f45b
+$ target/debug/deps/demux-*.exe   (cargo test -p vynamp-decode-mp4 --test demux)
+test an_stsc_out_of_order_is_invalid ... FAILED
+test a_fixed_size_stsz_count_is_bounded_by_the_limits_without_a_source_length ... FAILED
+test a_large_stsc_opens_in_linear_time ... FAILED
+thread 'an_stsc_out_of_order_is_invalid' (100108) panicked at crates\vynamp-decode-mp4\tests\demux.rs:565:5:
+thread 'a_fixed_size_stsz_count_is_bounded_by_the_limits_without_a_source_length' (83612) panicked at crates\vynamp-decode-mp4\tests\demux.rs:532:5:
+assertion `left == right` failed
+  left: Invalid { what: "mp4 sample count", offset: 285 }
+ right: Limit(Metadata)
+thread 'a_large_stsc_opens_in_linear_time' (101400) panicked at crates\vynamp-decode-mp4\tests\demux.rs:551:5:
+open took 568.2829817s
+test result: FAILED. 17 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 568.64s
+
+# Achados 4 e 5: testes novos em decode.rs sobre o código de 51792d9; corrigidos em 33512b3
+# (a_compressed_frame_with_zero_residuals_decodes_to_silence é controle positivo e passa)
+$ target/debug/deps/decode-*.exe   (cargo test -p vynamp-decode-alac --test decode)
+test an_unknown_element_tag_is_invalid_and_resilient_silence ... FAILED
+test an_unknown_prediction_type_is_invalid_and_resilient_silence ... FAILED
+test a_sample_count_the_packet_cannot_hold_is_rejected_before_decoding ... FAILED
+thread 'an_unknown_element_tag_is_invalid_and_resilient_silence' (92816) panicked at crates\vynamp-decode-alac\tests\decode.rs:237:18:
+expected Invalid(alac element), got Err(Unsupported("alac element"))
+thread 'an_unknown_prediction_type_is_invalid_and_resilient_silence' (104888) panicked at crates\vynamp-decode-alac\tests\decode.rs:237:18:
+expected Invalid(alac prediction type), got Err(Unsupported("alac prediction type"))
+thread 'a_sample_count_the_packet_cannot_hold_is_rejected_before_decoding' (102560) panicked at crates\vynamp-decode-alac\tests\decode.rs:236:50:
+assertion `left == right` failed
+  left: "bitstream eof"
+ right: "alac frame size"
+test result: FAILED. 8 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.38s
+
+# Nits (capítulos em ordem de início, trak sem tkhd fora de uso): testes novos em demux.rs
+# sobre o código de 263f45b; corrigidos em 063a716
+$ target/debug/deps/demux-*.exe   (cargo test -p vynamp-decode-mp4 --test demux)
+test a_track_without_tkhd_that_is_not_used_does_not_fail_the_open ... FAILED
+test chapters_are_returned_in_start_order ... FAILED
+thread 'a_track_without_tkhd_that_is_not_used_does_not_fail_the_open' (87612) panicked at crates\vynamp-decode-mp4\tests\demux.rs:196:67:
+open: Invalid { what: "mp4 tkhd", offset: 768 }
+thread 'chapters_are_returned_in_start_order' (86136) panicked at crates\vynamp-decode-mp4\tests\demux.rs:594:5:
+assertion `left == right` failed
+  left: [("Second", 14400), ("First", 7200)]
+ right: [("First", 7200), ("Second", 14400)]
+test result: FAILED. 20 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.39s
+
+# Nit manifest(): com a coluna de taxa de alac-s16.m4a trocada por "48k" no disco
+# (restaurada depois), o teste agora reprova em vez de ler 0; commit d4ccb81
+$ target/debug/deps/mp4_alac-*.exe   (cargo test -p vynamp-decode --test mp4_alac)
+bad number "48k" in manifest row alac-s16.m4a|...: invalid digit found in string
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out
+
+# Ressalvas do revisor em 8369d4c (alocação controlada pelo arquivo)
+# 1. stsz com tamanho fixo 0xFFFFFFFF e uma amostra, numa fonte sem len: teste novo sobre
+#    o código de 8369d4c; corrigido em e84196e
+$ target/debug/deps/demux-*.exe a_sample_larger   (cargo test -p vynamp-decode-mp4 --test demux)
+test a_sample_larger_than_a_source_without_length_fails_without_allocating_its_size ... FAILED
+thread 'a_sample_larger_than_a_source_without_length_fails_without_allocating_its_size' (91496) panicked at crates\vynamp-decode-mp4\tests\demux.rs:636:5:
+allocated 4294967295 bytes for a file of a few hundred
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 22 filtered out; finished in 22.57s
+
+# 2. frame ALAC comprimido de 64 bytes declarando 16M amostras: teste novo sobre o código
+#    de 8369d4c; corrigido em 46b3e6e (fixtures reais de mp4_alac.rs seguem bit-exatas)
+$ target/debug/deps/decode-*.exe   (cargo test -p vynamp-decode-alac --test decode)
+test a_compressed_count_beyond_what_the_packet_can_encode_is_rejected ... FAILED
+thread 'a_compressed_count_beyond_what_the_packet_can_encode_is_rejected' (27784) panicked at crates\vynamp-decode-alac\tests\decode.rs:236:50:
+assertion `left == right` failed
+  left: "bitstream eof"
+ right: "alac frame size"
+test result: FAILED. 11 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.28s

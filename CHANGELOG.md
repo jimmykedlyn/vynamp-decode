@@ -33,3 +33,8 @@
   bitstreams are not redistributable and are not used: Layers II and III are `oracle`; Layer I is
   `experimental` and now has its own codec descriptor, `mpeg-audio-layer1`. MP3 decode benchmark
   (about 160x to 235x realtime for 44.1 kHz stereo) in the book.
+- MP4 (`mp4`: `.m4a`, `.m4b`, `.mp4`) demuxer and ALAC decoder (`alac`; 16 and 24 bits, mono and
+  stereo), default features, verification level `oracle` (bit-exact to the PCM FFmpeg encoded).
+  M4B chapters through `Reader::chapters()` (`Chapter`, `Demuxer::chapters`), from `udta/chpl` or
+  the `tref/chap` text track. The edit list is not applied; a non-identity one makes the track's
+  gapless level `Unknown`.

@@ -1,6 +1,6 @@
 //! Demuxer and decoder traits.
 
-use crate::{AudioBuffer, Event, Packet, Result, Track};
+use crate::{AudioBuffer, Chapter, Event, Packet, Result, Track};
 
 /// Result of a seek.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,6 +25,10 @@ pub trait Demuxer: Send {
     /// queue was full. The default drops none.
     fn take_events_dropped(&mut self) -> u64 {
         0
+    }
+    /// Chapter marks declared by the container, in start order. The default has none.
+    fn chapters(&self) -> &[Chapter] {
+        &[]
     }
 }
 

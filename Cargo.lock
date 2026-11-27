@@ -7,9 +7,11 @@ name = "vynamp-decode"
 version = "0.0.0"
 dependencies = [
  "vynamp-decode-aiff",
+ "vynamp-decode-alac",
  "vynamp-decode-core",
  "vynamp-decode-flac",
  "vynamp-decode-mp3",
+ "vynamp-decode-mp4",
  "vynamp-decode-mpa",
  "vynamp-decode-pcm",
  "vynamp-decode-riff",
@@ -23,6 +25,13 @@ dependencies = [
  "vynamp-decode-core",
  "vynamp-decode-pcm",
  "vynamp-decode-testkit",
+]
+
+[[package]]
+name = "vynamp-decode-alac"
+version = "0.0.0"
+dependencies = [
+ "vynamp-decode-core",
 ]
 
 [[package]]
@@ -44,6 +53,13 @@ dependencies = [
  "vynamp-decode-core",
  "vynamp-decode-mpa",
  "vynamp-decode-testkit",
+]
+
+[[package]]
+name = "vynamp-decode-mp4"
+version = "0.0.0"
+dependencies = [
+ "vynamp-decode-core",
 ]
 
 [[package]]
