@@ -1,0 +1,29 @@
+# TASK-E01-11 — prova do vermelho
+# base 2f4dd8a + fixtures (308ceaf) + teste mp4_alac.rs + acréscimos de API no core (CodecId::Alac, Chapter, Demuxer::chapters, Reader::chapters)
+# features mp4/alac declaradas, sem crate de container/codec registrado
+$ cargo test -p vynamp-decode --test mp4_alac --locked
+
+running 2 tests
+test m4b_chapters_match_their_ffmetadata ... FAILED
+test alac_in_mp4_decodes_bit_exact_to_its_source ... FAILED
+
+failures:
+
+---- m4b_chapters_match_their_ffmetadata stdout ----
+
+thread 'm4b_chapters_match_their_ffmetadata' panicked at crates\vynamp-decode\tests\mp4_alac.rs:231:31:
+alac-s16-chapters.m4b: unsupported: container
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- alac_in_mp4_decodes_bit_exact_to_its_source stdout ----
+
+thread 'alac_in_mp4_decodes_bit_exact_to_its_source' panicked at crates\vynamp-decode\tests\mp4_alac.rs:144:35:
+alac-s16.m4a: unsupported: container
+
+
+failures:
+    alac_in_mp4_decodes_bit_exact_to_its_source
+    m4b_chapters_match_their_ffmetadata
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
