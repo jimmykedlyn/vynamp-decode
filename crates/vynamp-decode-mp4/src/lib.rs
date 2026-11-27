@@ -22,7 +22,7 @@
 mod boxes;
 mod table;
 
-use boxes::Bx;
+use boxes::{Bx, Cur};
 use table::Sample;
 use vynamp_decode_core::{
     ByteReader, CancelToken, Chapter, CodecId, Demuxer, Error, GaplessKind, LimitKind, Mode,
@@ -287,7 +287,8 @@ fn text_chapters(
 ) -> Result<Vec<Chapter>> {
     let mut found = None;
     for t in traks {
-        if track_id(t)? == id {
+        // A trak without tkhd has no id, so it cannot be the one `tref/chap` names.
+        if t.child(b"tkhd")?.is_some() && track_id(t)? == id {
             found = Some(*t);
         }
     }
@@ -315,12 +316,7 @@ fn text_chapters(
         buf.resize(s.size as usize, 0);
         src.seek(s.offset)?;
         ByteReader::new(src).read_exact(&mut buf)?;
-        let bx = Bx {
-            kind: *b"text",
-            body: &buf,
-            offset: s.offset,
-        };
-        let mut c = bx.cur();
+        let mut c = Cur::new(&buf, s.offset);
         let len = c.u16()?;
         let at = c.offset();
         let text = c.take(usize::from(len))?;
@@ -389,7 +385,7 @@ pub fn open_mp4(mut src: Box<dyn Source>, opts: &Options) -> Result<Mp4Demuxer> 
         Some(tref) => tref.child(b"chap")?,
         None => None,
     };
-    let chapters = match (udta_chpl, chap_ref) {
+    let mut chapters = match (udta_chpl, chap_ref) {
         (Some(chpl), _) => chpl_chapters(&chpl, rate, opts.mode)?,
         (None, Some(chap)) => {
             let target = chap.cur().u32()?;
@@ -397,6 +393,9 @@ pub fn open_mp4(mut src: Box<dyn Source>, opts: &Options) -> Result<Mp4Demuxer> 
         }
         (None, None) => Vec::new(),
     };
+    // Containers list chapters in file order, which need not be start order; the stable
+    // sort keeps file order between chapters that start on the same frame.
+    chapters.sort_by_key(|c| c.start_frame);
 
     let track = Track {
         id,

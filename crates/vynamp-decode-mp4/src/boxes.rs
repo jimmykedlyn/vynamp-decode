@@ -13,11 +13,7 @@ pub(crate) struct Bx<'a> {
 impl<'a> Bx<'a> {
     /// A cursor over the payload.
     pub fn cur(&self) -> Cur<'a> {
-        Cur {
-            d: self.body,
-            at: 0,
-            base: self.offset,
-        }
+        Cur::new(self.body, self.offset)
     }
 
     /// The child boxes, `skip` bytes into the payload.
@@ -80,6 +76,11 @@ pub(crate) struct Cur<'a> {
 }
 
 impl<'a> Cur<'a> {
+    /// A cursor over `d`, whose first byte is at absolute source offset `base`.
+    pub fn new(d: &'a [u8], base: u64) -> Self {
+        Self { d, at: 0, base }
+    }
+
     pub fn eof(&self) -> Error {
         Error::Invalid {
             what: "unexpected eof",

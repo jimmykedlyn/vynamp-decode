@@ -104,6 +104,8 @@ struct Spec {
     edts: Option<Vec<u8>>,
     /// Audio stts (count, delta).
     stts: Vec<(u32, u32)>,
+    /// Boxes appended to moov after the tracks.
+    moov_tail: Vec<u8>,
 }
 
 impl Default for Spec {
@@ -113,6 +115,7 @@ impl Default for Spec {
             chpl: None,
             edts: None,
             stts: vec![(2, 4096), (1, 1000)],
+            moov_tail: Vec::new(),
         }
     }
 }
@@ -184,6 +187,7 @@ fn file(spec: &Spec) -> Vec<u8> {
         }
         moov_body.extend(bx(b"udta", &full(b"chpl", 0x0100_0000, &b)));
     }
+    moov_body.extend_from_slice(&spec.moov_tail);
     let moov = bx(b"moov", &moov_body);
     [ftyp, mdat, moov].concat()
 }
@@ -572,4 +576,31 @@ fn an_stsc_out_of_order_is_invalid() {
         ),
         "{e:?}"
     );
+}
+
+#[test]
+fn chapters_are_returned_in_start_order() {
+    // chpl lists its entries in file order, which a writer need not keep sorted.
+    let spec = Spec {
+        chpl: Some(vec![(3_000_000, "Second"), (1_500_000, "First")]),
+        ..Spec::default()
+    };
+    let d = open(file(&spec));
+    let got: Vec<(&str, u64)> = d
+        .chapters()
+        .iter()
+        .map(|c| (c.title.as_str(), c.start_frame))
+        .collect();
+    assert_eq!(got, vec![("First", 7200), ("Second", 14_400)]);
+}
+
+#[test]
+fn a_track_without_tkhd_that_is_not_used_does_not_fail_the_open() {
+    // A trak with no tkhd and no media is neither the audio track nor the chapter track.
+    let spec = Spec {
+        moov_tail: bx(b"trak", &bx(b"free", &[])),
+        ..Spec::default()
+    };
+    let d = open(file(&spec));
+    assert_eq!(d.chapters().len(), 2);
 }
