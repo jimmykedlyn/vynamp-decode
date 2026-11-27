@@ -7,7 +7,7 @@
 | Tipo | lib |
 | Versão da spec | 0.2.0 |
 | Data | 2026-11-11 |
-| Estado | **rascunho autorado, não aprovado** — §3 a §10 escritos a partir do código e dos testes existentes; a aprovação é do mantenedor, por `GOVERNANCE.md`. Única exceção: as linhas `DECODE-AC-53` e `DECODE-AC-54` de §5, aprovadas pelo mantenedor no PR de spec de 2026-11-27 (nota ao fim da tabela de §5) |
+| Estado | **rascunho autorado, não aprovado** — §3 a §10 escritos a partir do código e dos testes existentes; a aprovação é do mantenedor, por `GOVERNANCE.md`. Únicas exceções: as linhas `DECODE-AC-53`, `DECODE-AC-54` e `DECODE-AC-55` de §5, aprovadas pelo mantenedor em PRs de spec de 2026-11-27 (notas ao fim da tabela de §5) |
 | Dono | mantenedor do `vynamp-decode` |
 | Depende de | `vynamp-decode-core` (contratos); `vynamp-dsp` (opcional, feature `resample`) |
 | É dependido por | engine; encode (para transcodificar sem segundo parser) |
@@ -143,8 +143,8 @@ nome próprio e uma TASK dona. O ID sem sufixo não é mais usado.
 | DECODE-AC-56 | um Opus CELT-only fullband em Ogg em `tests/fixtures/modern/opus-celt/`, gerado pelo FFmpeg fixado (`-c:a libopus -application audio`), listado no `MANIFEST.txt` do diretório com sha256, taxa, canais e frames, mais o decode de referência produzido pelo mesmo FFmpeg | o arquivo é decodificado e o PCM é comparado contra o WAV de referência | SNR >= 90 dB contra a referência (tolerância explícita para lossy); `frames()` devolve a contagem bruta do manifesto (antes de pre-skip); seek para o frame da metade cai no slice esperado (TASK-E01-13-AC-1) | `opus_celt.rs::opus_celt_matches_the_ffmpeg_reference` |
 | DECODE-AC-57 | um Opus SILK-only e um Opus híbrido em Ogg em `tests/fixtures/modern/opus-silk/`, gerados pelo FFmpeg fixado a partir da mesma origem mono de banda larga com semente fixa (`-f lavfi -i "anoisesrc=color=pink:amplitude=0.3:duration=5:sample_rate=48000:seed=42,volume='0.5+0.5*sin(2*PI*4*t)':eval=frame"`, ruído rosa de 5 s modulado em amplitude a 4 Hz; um tom puro não serve, porque o libopus troca para CELT) e com `-fflags +bitexact -serial_offset 0`, para que cada geração saia byte a byte igual: o SILK-only com `-ac 1 -ar 16000 -c:a libopus -application voip -b:a 16k`, o híbrido com `-ac 1 -c:a libopus -application voip -b:a 18k` (48 kHz fullband, bitrate baixo; 18k fica no meio da faixa de 14k a 22k em que todo pacote saiu híbrido na medição, e a 24k já apareceram pacotes CELT config 31 misturados); cada um listado no `MANIFEST.txt` do diretório com sha256, taxa, canais e frames, e com decode de referência do mesmo FFmpeg | o byte de TOC de cada pacote de áudio dos dois arquivos é lido do Ogg (RFC 6716 §3.1, os 5 bits altos dão o config), e depois cada arquivo é decodificado e o PCM é comparado contra o WAV de referência correspondente | todo pacote do arquivo SILK-only tem config de TOC entre 0 e 11 e todo pacote do arquivo híbrido tem config de TOC entre 12 e 15; SNR >= 80 dB contra a referência (tolerância explícita, menor que CELT pelo codec); `frames()` devolve a contagem bruta do manifesto; seek para o frame da metade cai no slice esperado (TASK-E01-14-AC-1) | `opus_silk_hybrid.rs::opus_silk_and_hybrid_match_the_ffmpeg_reference` |
 
-> **`DECODE-AC-53` a `-57` autorados em 2026-11-24, não aprovados** (exceto `-53` e
-> `-54`, ver a nota seguinte). Vêm do fatiamento da
+> **`DECODE-AC-53` a `-57` autorados em 2026-11-24, não aprovados** (exceto `-53`,
+> `-54` e `-55`, ver as notas seguintes). Vêm do fatiamento da
 > `TASK-E01-07` (`DECODE-REQ-46-MP4`, `-VORBIS`, `-OPUS-CELT`, `-OPUS-SILK`); o `Then` de
 > cada um é cópia literal da TASK correspondente, e os testes não existem ainda: a
 > coluna `Teste` nomeia o que cada TASK cria. Cada TASK tem arquivo de teste e diretório
@@ -157,6 +157,12 @@ nome próprio e uma TASK dona. O ID sem sufixo não é mais usado.
 > vale pelo texto das linhas `DECODE-AC-53` e `DECODE-AC-54` da tabela acima nesse commit
 > e não alcança `DECODE-AC-55` a `-57`,
 > que seguem autorados e não aprovados. O resto deste arquivo continua rascunho.
+>
+> **`DECODE-AC-55` aprovado pelo mantenedor no merge do PR que traz esta nota (aberto em
+> 2026-11-27),** a pedido dele, para desbloquear a `TASK-E01-12`. A aprovação vale pelo
+> texto da linha `DECODE-AC-55` da tabela acima nesse commit e não alcança `DECODE-AC-56`
+> nem `-57`, que seguem autorados e não aprovados. O resto deste arquivo continua
+> rascunho.
 
 ### Critérios que esta spec **não** fixa
 

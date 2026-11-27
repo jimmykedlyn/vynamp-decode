@@ -10,7 +10,7 @@
 | Módulo dono | `vynamp-decode` |
 | Repo | `jimmykedlyn/vynamp-decode` |
 | REQ coberto | `REQ-E01-12` (sub-requisito `DECODE-REQ-46-VORBIS` em `specs/formatos.md` §4) |
-| Critérios da spec | `specs/formatos.md` §5 — `DECODE-AC-55` (autorado, não aprovado) |
+| Critérios da spec | `specs/formatos.md` §5 — `DECODE-AC-55` (aprovado pelo mantenedor no merge do PR de spec de 2026-11-27) |
 | Fase | M2 |
 | Prioridade | P0 |
 | Estado | planned |
