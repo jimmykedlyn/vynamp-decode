@@ -302,7 +302,7 @@ fn text_chapters(
     };
     let mdia = trak.child(b"mdia")?.ok_or(invalid("mp4 mdia", &trak))?;
     let scale = timescale(&mdia)?;
-    let samples = table::samples(&stbl(&mdia)?, media_bytes)?;
+    let samples = table::samples(&stbl(&mdia)?, media_bytes, &opts.limits)?;
     let bytes: u64 = samples.iter().map(|s| u64::from(s.size)).sum();
     if bytes > u64::from(opts.limits.max_metadata_bytes) {
         return Err(Error::Limit(LimitKind::Metadata));
@@ -376,7 +376,7 @@ pub fn open_mp4(mut src: Box<dyn Source>, opts: &Options) -> Result<Mp4Demuxer> 
     if media_ts != rate {
         return Err(Error::Unsupported("mp4 timescale"));
     }
-    let samples = table::samples(&stbl, media_bytes)?;
+    let samples = table::samples(&stbl, media_bytes, &opts.limits)?;
     let total = samples.last().map_or(0, |s| s.pts + u64::from(s.duration));
     opts.limits.check_frames(total)?;
     let exact = identity_edit(&trak, movie_timescale(&moov)?, media_ts, total)?;

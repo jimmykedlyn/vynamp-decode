@@ -1,7 +1,7 @@
 //! Sample tables (`stbl`): where each sample lives and when it plays.
 
 use crate::boxes::Bx;
-use vynamp_decode_core::{Error, LimitKind, Result};
+use vynamp_decode_core::{Error, LimitKind, Limits, Result};
 
 /// One sample (an access unit; for ALAC, one codec frame).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,15 +27,20 @@ fn need<'a>(stbl: &Bx<'a>, kind: &[u8; 4]) -> Result<Bx<'a>> {
     stbl.child(kind)?.ok_or(invalid("mp4 sample table", stbl))
 }
 
-/// Per-sample sizes from `stsz` or `stz2`. `media_bytes` bounds what a fixed-size `stsz`
-/// may declare, since its count has no entries behind it.
-fn sizes(stbl: &Bx<'_>, media_bytes: u64) -> Result<Vec<u32>> {
+/// Per-sample sizes from `stsz` or `stz2`. A fixed-size `stsz` declares its count with no
+/// entries behind it, so the count is bounded before allocating: by the room an explicit
+/// table of that many entries would take in the moov (`Limit(Metadata)`), and by
+/// `media_bytes` (`Invalid`).
+fn sizes(stbl: &Bx<'_>, media_bytes: u64, limits: &Limits) -> Result<Vec<u32>> {
     if let Some(b) = stbl.child(b"stsz")? {
         let mut c = b.cur();
         c.version()?;
         let fixed = c.u32()?;
         if fixed != 0 {
             let n = c.u32()?;
+            if u64::from(n) * 4 > u64::from(limits.max_metadata_bytes) {
+                return Err(Error::Limit(LimitKind::Metadata));
+            }
             if u64::from(n) * u64::from(fixed) > media_bytes {
                 return Err(invalid("mp4 sample count", &b));
             }
@@ -89,10 +94,11 @@ fn chunk_offsets(stbl: &Bx<'_>) -> Result<Vec<u64>> {
     (0..n).map(|_| c.u64()).collect()
 }
 
-/// Builds the sample list of `stbl`; samples must fit in `media_bytes`. The tables must
-/// agree on the sample count; a total duration past `u64` is `Limit(Frames)`.
-pub(crate) fn samples(stbl: &Bx<'_>, media_bytes: u64) -> Result<Vec<Sample>> {
-    let sizes = sizes(stbl, media_bytes)?;
+/// Builds the sample list of `stbl`; samples must fit in `media_bytes` and `limits`. The
+/// tables must agree on the sample count and `stsc` must list strictly increasing chunk
+/// numbers from 1; a total duration past `u64` is `Limit(Frames)`.
+pub(crate) fn samples(stbl: &Bx<'_>, media_bytes: u64, limits: &Limits) -> Result<Vec<Sample>> {
+    let sizes = sizes(stbl, media_bytes, limits)?;
     let n = sizes.len();
 
     let stts = need(stbl, b"stts")?;
@@ -114,10 +120,16 @@ pub(crate) fn samples(stbl: &Bx<'_>, media_bytes: u64) -> Result<Vec<Sample>> {
     let mut c = stsc.cur();
     c.version()?;
     let entries = c.count(12)?;
-    let mut chunk_map = Vec::with_capacity(entries);
+    let mut chunk_map: Vec<(u32, u32)> = Vec::with_capacity(entries);
     for _ in 0..entries {
         let (first, per_chunk) = (c.u32()?, c.u32()?);
         c.skip(4)?;
+        if chunk_map
+            .last()
+            .map_or(first == 0, |&(prev, _)| first <= prev)
+        {
+            return Err(invalid("mp4 stsc order", &stsc));
+        }
         chunk_map.push((first, per_chunk));
     }
     let chunks = chunk_offsets(stbl)?;
@@ -126,14 +138,21 @@ pub(crate) fn samples(stbl: &Bx<'_>, media_bytes: u64) -> Result<Vec<Sample>> {
     let mut sizes_it = sizes.iter();
     let mut runs_it = runs.into_iter().flat_map(|(k, d)| (0..k).map(move |_| d));
     let mut pts: u64 = 0;
+    // The entry with the largest first_chunk <= chunk_no applies; chunk numbers only grow
+    // and `chunk_map` is strictly increasing, so a cursor finds it in linear total time.
+    let mut entry = 0;
     'chunks: for (ci, &chunk_start) in chunks.iter().enumerate() {
         let chunk_no = ci as u64 + 1;
-        // The entry with the largest first_chunk <= chunk_no applies.
-        let per_chunk = chunk_map
-            .iter()
-            .take_while(|&&(first, _)| u64::from(first) <= chunk_no)
-            .last()
-            .map_or(0, |&(_, k)| k);
+        while chunk_map
+            .get(entry + 1)
+            .is_some_and(|&(first, _)| u64::from(first) <= chunk_no)
+        {
+            entry += 1;
+        }
+        let per_chunk = match chunk_map.get(entry) {
+            Some(&(first, k)) if u64::from(first) <= chunk_no => k,
+            _ => 0,
+        };
         let mut offset = chunk_start;
         for _ in 0..per_chunk {
             let Some(&size) = sizes_it.next() else {

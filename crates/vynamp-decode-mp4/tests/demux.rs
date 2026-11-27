@@ -2,7 +2,7 @@
 
 use vynamp_decode_core::{
     Chapter, CodecId, Demuxer, Error, GaplessKind, LimitKind, Limits, Mode, Options, Packet,
-    SeekTo, VecSource,
+    SeekTo, Source, VecSource,
 };
 use vynamp_decode_mp4::{open_mp4, probe_mp4};
 
@@ -482,4 +482,94 @@ fn a_packet_beyond_the_end_of_the_file_is_invalid() {
     assert!(d.next_packet(&mut p).unwrap());
     let e = d.next_packet(&mut p).unwrap_err();
     assert!(matches!(e, Error::Invalid { .. }), "{e:?}");
+}
+
+/// A file holding only ftyp and a moov with one ALAC track described by `t`; no media.
+fn audio_only(t: &Table) -> Vec<u8> {
+    let ftyp = bx(b"ftyp", b"M4A \0\0\0\0M4A isom");
+    let audio = trak(1, b"soun", RATE, Vec::new(), stbl(alac_entry(RATE, 2), t));
+    let mvhd = full(b"mvhd", 0, &u32s(&[0, 0, 1000, 0]));
+    [ftyp, bx(b"moov", &[mvhd, audio].concat())].concat()
+}
+
+/// A source that does not know its length, like a pipe.
+struct NoLen(VecSource);
+
+impl Source for NoLen {
+    fn read(&mut self, buf: &mut [u8]) -> vynamp_decode_core::Result<usize> {
+        self.0.read(buf)
+    }
+    fn seek(&mut self, pos: u64) -> vynamp_decode_core::Result<()> {
+        self.0.seek(pos)
+    }
+    fn position(&self) -> u64 {
+        self.0.position()
+    }
+    fn len(&self) -> Option<u64> {
+        None
+    }
+}
+
+#[test]
+fn a_fixed_size_stsz_count_is_bounded_by_the_limits_without_a_source_length() {
+    // A fixed-size stsz declares its count with no entries behind it. Without a source
+    // length nothing else bounds it, so a forged count must hit a limit before the sample
+    // table is allocated: an explicit table that large could not fit in `max_metadata_bytes`.
+    let mut f = audio_only(&Table {
+        stts: vec![(1, 4096)],
+        sizes: Vec::new(),
+        per_chunk: vec![1],
+        offsets: vec![0],
+    });
+    let stsz = f.windows(4).position(|w| w == b"stsz").unwrap();
+    f[stsz + 8..stsz + 12].copy_from_slice(&1u32.to_be_bytes());
+    let count = Limits::default().max_metadata_bytes / 4 + 1;
+    f[stsz + 12..stsz + 16].copy_from_slice(&count.to_be_bytes());
+    let e = match open_mp4(Box::new(NoLen(VecSource::new(f))), &Options::default()) {
+        Ok(_) => panic!("open succeeded"),
+        Err(e) => e,
+    };
+    assert_eq!(e, Error::Limit(LimitKind::Metadata));
+}
+
+#[test]
+fn a_large_stsc_opens_in_linear_time() {
+    // One stsc entry per chunk: a per-chunk scan of stsc is quadratic and takes tens of
+    // seconds here; a cursor over the sorted entries takes milliseconds. The bound is loose
+    // on purpose (debug build, loaded CI machine).
+    const N: usize = 200_000;
+    let f = audio_only(&Table {
+        stts: vec![(N as u32, 4096)],
+        sizes: vec![1; N],
+        per_chunk: vec![1; N],
+        offsets: vec![0; N],
+    });
+    let start = std::time::Instant::now();
+    let d = open(f);
+    let took = start.elapsed();
+    assert_eq!(d.tracks()[0].frames, Some(N as u64 * 4096));
+    assert!(
+        took < std::time::Duration::from_secs(5),
+        "open took {took:?}"
+    );
+}
+
+#[test]
+fn an_stsc_out_of_order_is_invalid() {
+    let mut f = file(&Spec::default());
+    // The audio stsc has entries (1, 2, 1) and (2, 1, 1); make the second start at chunk 1.
+    let stsc = f.windows(4).position(|w| w == b"stsc").unwrap();
+    let second_first = stsc + 4 + 8 + 12;
+    f[second_first..second_first + 4].copy_from_slice(&1u32.to_be_bytes());
+    let e = open_err(f, &Options::default());
+    assert!(
+        matches!(
+            e,
+            Error::Invalid {
+                what: "mp4 stsc order",
+                ..
+            }
+        ),
+        "{e:?}"
+    );
 }
