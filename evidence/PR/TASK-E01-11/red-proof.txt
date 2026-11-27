@@ -27,3 +27,77 @@ failures:
 
 test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
 
+
+# crates/vynamp-decode-mp4/tests/demux.rs contra um stub que compila e não faz nada
+# (probe_mp4 -> 0, open_mp4 -> Err(Unsupported("container")))
+$ cargo test -p vynamp-decode-mp4 --test demux
+running 17 tests
+test a_length_beyond_max_frames_is_a_limit_error ... FAILED
+test a_non_identity_edit_list_makes_gapless_unknown ... FAILED
+test a_non_alac_sample_entry_is_unsupported ... FAILED
+test a_box_smaller_than_its_header_is_invalid ... FAILED
+test chpl_takes_precedence_over_the_text_track ... FAILED
+test a_packet_beyond_the_end_of_the_file_is_invalid ... FAILED
+test chapters_come_from_the_text_track_named_by_tref_chap ... FAILED
+test a_file_without_moov_is_invalid ... FAILED
+test invalid_utf8_in_a_chapter_title_is_strict_invalid_and_resilient_lossy ... FAILED
+test moov_larger_than_the_metadata_limit_is_a_limit_error ... FAILED
+test no_chapters_without_tref_or_chpl ... FAILED
+test packets_follow_the_sample_tables_across_chunks ... FAILED
+test probe_needs_an_ftyp_box ... FAILED
+test seek_lands_on_the_packet_holding_the_frame ... FAILED
+test tables_that_disagree_on_the_sample_count_are_invalid ... FAILED
+test the_audio_track_is_described_from_the_sample_entry_and_tables ... FAILED
+test truncated_moov_is_a_typed_error ... FAILED
+thread 'a_length_beyond_max_frames_is_a_limit_error' (39672) panicked at crates\vynamp-decode-mp4\tests\demux.rs:382:5:
+  left: Unsupported("container")
+ right: Limit(Frames)
+thread 'a_non_identity_edit_list_makes_gapless_unknown' (93524) panicked at crates\vynamp-decode-mp4\tests\demux.rs:176:67:
+thread 'a_non_alac_sample_entry_is_unsupported' (106480) panicked at crates\vynamp-decode-mp4\tests\demux.rs:422:5:
+  left: Unsupported("container")
+ right: Unsupported("mp4 codec")
+thread 'a_box_smaller_than_its_header_is_invalid' (100372) panicked at crates\vynamp-decode-mp4\tests\demux.rs:346:5:
+thread 'chpl_takes_precedence_over_the_text_track' (105232) panicked at crates\vynamp-decode-mp4\tests\demux.rs:176:67:
+thread 'a_packet_beyond_the_end_of_the_file_is_invalid' (104964) panicked at crates\vynamp-decode-mp4\tests\demux.rs:176:67:
+thread 'chapters_come_from_the_text_track_named_by_tref_chap' (102052) panicked at crates\vynamp-decode-mp4\tests\demux.rs:176:67:
+thread 'a_file_without_moov_is_invalid' (92628) panicked at crates\vynamp-decode-mp4\tests\demux.rs:403:5:
+thread 'invalid_utf8_in_a_chapter_title_is_strict_invalid_and_resilient_lossy' (19716) panicked at crates\vynamp-decode-mp4\tests\demux.rs:434:5:
+thread 'moov_larger_than_the_metadata_limit_is_a_limit_error' (106996) panicked at crates\vynamp-decode-mp4\tests\demux.rs:367:5:
+  left: Unsupported("container")
+ right: Limit(Metadata)
+thread 'no_chapters_without_tref_or_chpl' (99460) panicked at crates\vynamp-decode-mp4\tests\demux.rs:176:67:
+thread 'packets_follow_the_sample_tables_across_chunks' (99628) panicked at crates\vynamp-decode-mp4\tests\demux.rs:176:67:
+thread 'probe_needs_an_ftyp_box' (16496) panicked at crates\vynamp-decode-mp4\tests\demux.rs:197:5:
+  left: 0
+ right: 100
+thread 'seek_lands_on_the_packet_holding_the_frame' (99284) panicked at crates\vynamp-decode-mp4\tests\demux.rs:176:67:
+thread 'tables_that_disagree_on_the_sample_count_are_invalid' (82848) panicked at crates\vynamp-decode-mp4\tests\demux.rs:395:5:
+thread 'the_audio_track_is_described_from_the_sample_entry_and_tables' (17504) panicked at crates\vynamp-decode-mp4\tests\demux.rs:176:67:
+thread 'truncated_moov_is_a_typed_error' (106592) panicked at crates\vynamp-decode-mp4\tests\demux.rs:335:9:
+test result: FAILED. 0 passed; 17 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+# crates/vynamp-decode-alac/tests/decode.rs contra um stub que compila e não faz nada
+# (AlacDecoder::new -> Ok, decode -> Ok(()) sem tocar o buffer)
+$ cargo test -p vynamp-decode-alac --test decode
+running 7 tests
+test configuration_errors_are_typed ... FAILED
+test truncated_frame_is_invalid_at_an_absolute_offset ... FAILED
+test a_frame_without_end_tag_is_invalid ... FAILED
+test resilient_turns_a_bad_frame_into_silence_and_reports_it ... FAILED
+test a_mono_element_in_a_stereo_stream_is_invalid ... FAILED
+test verbatim_mono_24_bit_frame_is_sign_extended_i24 ... FAILED
+test verbatim_stereo_16_bit_frame_decodes_to_its_samples ... FAILED
+thread 'configuration_errors_are_typed' (64252) panicked at crates\vynamp-decode-alac\tests\decode.rs:183:5:
+thread 'truncated_frame_is_invalid_at_an_absolute_offset' (90888) panicked at crates\vynamp-decode-alac\tests\decode.rs:128:18:
+thread 'a_frame_without_end_tag_is_invalid' (84312) panicked at crates\vynamp-decode-alac\tests\decode.rs:146:10:
+thread 'resilient_turns_a_bad_frame_into_silence_and_reports_it' (87204) panicked at crates\vynamp-decode-alac\tests\decode.rs:164:5:
+  left: 0
+ right: 100
+thread 'a_mono_element_in_a_stereo_stream_is_invalid' (105520) panicked at crates\vynamp-decode-alac\tests\decode.rs:155:10:
+thread 'verbatim_mono_24_bit_frame_is_sign_extended_i24' (27832) panicked at crates\vynamp-decode-alac\tests\decode.rs:116:5:
+  left: F32
+ right: I24
+thread 'verbatim_stereo_16_bit_frame_decodes_to_its_samples' (97116) panicked at crates\vynamp-decode-alac\tests\decode.rs:102:5:
+  left: F32
+ right: I16
+test result: FAILED. 0 passed; 7 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
