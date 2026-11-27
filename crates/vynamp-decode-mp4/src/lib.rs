@@ -423,6 +423,10 @@ pub fn open_mp4(mut src: Box<dyn Source>, opts: &Options) -> Result<Mp4Demuxer> 
     })
 }
 
+/// Most bytes `next_packet` adds to the packet buffer before reading them (1 MiB). Once
+/// the buffer has grown to the largest packet, reads reuse its capacity.
+const READ_STEP: usize = 1 << 20;
+
 impl Mp4Demuxer {
     fn total(&self) -> u64 {
         self.samples
@@ -451,11 +455,18 @@ impl Demuxer for Mp4Demuxer {
             });
         }
         out.data.clear();
-        out.data.resize(s.size as usize, 0);
         self.src.seek(s.offset)?;
-        if let Err(e) = ByteReader::new(self.src.as_mut()).read_exact(&mut out.data) {
-            out.data.clear();
-            return Err(e);
+        // Without a source length the sample size (up to 4 GiB) is unchecked, so the
+        // buffer grows by at most `READ_STEP` per read: a short source fails at its real
+        // end instead of first allocating what the table declares.
+        let size = s.size as usize;
+        while out.data.len() < size {
+            let done = out.data.len();
+            out.data.resize(done + (size - done).min(READ_STEP), 0);
+            if let Err(e) = ByteReader::new(self.src.as_mut()).read_exact(&mut out.data[done..]) {
+                out.data.clear();
+                return Err(e);
+            }
         }
         out.track = self.tracks[0].id;
         out.pts = s.pts;

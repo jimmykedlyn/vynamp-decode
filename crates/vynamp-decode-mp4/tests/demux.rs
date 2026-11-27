@@ -604,3 +604,38 @@ fn a_track_without_tkhd_that_is_not_used_does_not_fail_the_open() {
     let d = open(file(&spec));
     assert_eq!(d.chapters().len(), 2);
 }
+
+#[test]
+fn a_sample_larger_than_a_source_without_length_fails_without_allocating_its_size() {
+    // A fixed-size stsz of one 4 GiB sample. Without a source length nothing bounds the
+    // size up front, so the packet must be read in pieces and fail at the real end of the
+    // data instead of first allocating what the table declares.
+    let mut f = audio_only(&Table {
+        stts: vec![(1, 4096)],
+        sizes: Vec::new(),
+        per_chunk: vec![1],
+        offsets: vec![0],
+    });
+    let stsz = f.windows(4).position(|w| w == b"stsz").unwrap();
+    f[stsz + 8..stsz + 12].copy_from_slice(&u32::MAX.to_be_bytes());
+    f[stsz + 12..stsz + 16].copy_from_slice(&1u32.to_be_bytes());
+    let mut d = open_mp4(Box::new(NoLen(VecSource::new(f))), &Options::default())
+        .expect("open without length");
+    let mut p = Packet::default();
+    let e = d.next_packet(&mut p).unwrap_err();
+    assert!(
+        matches!(
+            e,
+            Error::Invalid {
+                what: "unexpected eof",
+                ..
+            }
+        ),
+        "{e:?}"
+    );
+    assert!(
+        p.data.capacity() <= 2 << 20,
+        "allocated {} bytes for a file of a few hundred",
+        p.data.capacity()
+    );
+}
