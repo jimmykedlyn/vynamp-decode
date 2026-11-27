@@ -119,7 +119,7 @@ anunciado como disponível.
 | `DECODE-AC-63` | um WAV precedido de ID3v2 grande dentro do limite | `probe` | identifica `riff` | `facade.rs::probe_skips_large_id3v2_tag` |
 | `DECODE-AC-64` | um cabeçalho ID3v2 malformado antes do áudio | `probe` | a tag não é pulada e o resultado é `Unsupported("container")` | `facade.rs::probe_malformed_id3v2_does_not_skip` |
 | `DECODE-AC-65` | tags ID3v2 cuja soma passa `max_metadata_bytes` | `probe` | `Err(Limit(Metadata))` | `facade.rs::probe_id3v2_beyond_metadata_limit_is_a_limit_error` |
-| `DECODE-AC-66` | `default_registry()` de um build com qualquer combinação de features | `codec_for` em `Pcm`, `Flac`, `Mp1`, `Mp2`, `Mp3` e contagem de `containers()` | cada codec existe se e só se sua feature está ligada, e a contagem de containers é a das features ligadas | `facade.rs::codec_lookup` |
+| `DECODE-AC-66` | `default_registry()` de um build com qualquer combinação de features | `codec_for` em `Pcm`, `Flac`, `Mp1`, `Mp2`, `Mp3`, `Alac` e contagem de `containers()` | cada codec existe se e só se sua feature está ligada, e a contagem de containers é a das features ligadas | `facade.rs::codec_lookup` |
 | `DECODE-AC-67` | `default_registry()` | ler `verification` de todos os descritores | `flac` = `Conformance`, `mpeg-audio-layer1` = `Experimental`, os demais = `Oracle` | `facade.rs::builtin_formats_have_the_expected_verification_level` |
 | `DECODE-AC-68` | o tipo `Reader` | compilar `assert_send::<Reader>()` | compila | `facade.rs::reader_is_send` |
 
@@ -177,7 +177,7 @@ Depende de: `vynamp-dsp` (opcional, feature `resample`)
 
 | Limitação | Consequência | Quem cobre |
 |---|---|---|
-| O registro tem 4 containers e 4 codecs: RIFF/AIFF/FLAC/MPEG audio. | Os outros 60+ formatos do catálogo seguem `planned`; nenhum é anunciado. | `specs/formatos.md` §4 (`DECODE-REQ-46-AAC`, `-MP4`, `-VORBIS`, `-OPUS-CELT`, `-OPUS-SILK`, `DECODE-REQ-47`, `-48`), `TASK-E01-07/11/12/13/14/08/09`, `TASK-E17-03/05` |
+| O registro tem 5 containers e 5 codecs: RIFF/AIFF/FLAC/MPEG audio/MP4. | Os outros 60+ formatos do catálogo seguem `planned`; nenhum é anunciado. | `specs/formatos.md` §4 (`DECODE-REQ-46-AAC`, `-VORBIS`, `-OPUS-CELT`, `-OPUS-SILK`, `DECODE-REQ-47`, `-48`), `TASK-E01-07/12/13/14/08/09`, `TASK-E17-03/05` |
 | Não há capability de runtime por tuple, só `Verification` por descritor. | A UI só sabe "abre ou não abre", sem perfil, backend ou limites. | `DECODE-REQ-70`, `TASK-E17-01` (M3) |
 | Rejeição de probe não diz o motivo. | O usuário vê só "formato não suportado". | `DECODE-REQ-71` |
 | MPEG Layer I é `Experimental`. | Não pode ser vendido como suporte verificado. | `TASK-E17-17` (legados) |

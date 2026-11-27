@@ -202,6 +202,14 @@ Depende de: `vynamp-dsp` (opcional, feature `resample`)
   (`TASK-E01-13`), `generate-opus-silk.ps1` → `modern/opus-silk/` (`TASK-E01-14`).
   O AAC da `TASK-E01-07` continua na seção AAC-LC de `generate.ps1`. Cada script é
   criado pela TASK dona e usa o FFmpeg de `$env:FFMPEG`.
+- FFmpeg fixado: `n8.1.3-35-gf1acb0a266-20261111`. É a versão com que as fixtures novas
+  são geradas a partir da `TASK-E01-11` (`modern/alac/`), e a que o `MANIFEST.txt` delas
+  registra. Ela já tinha sido usada para reproduzir byte a byte os arquivos de
+  `crates/vynamp-decode/tests/fixtures/mpeg/` (`triangulation.sha256`). Os 77 registros
+  dos `MANIFEST.txt` de `flac/`, `mpeg/` e `pcm/` foram gerados com
+  `n8.1.3-23-g5c4f5744cd-20261022` e não são regerados: é dívida aceita, porque regerar
+  mudaria os oráculos já aprovados sem ganho de cobertura. Trocar a versão fixada é
+  mudança desta linha, no mesmo PR que regera o que ela afetar.
 
 ## 10. Limitações conhecidas
 
