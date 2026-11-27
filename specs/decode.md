@@ -3,7 +3,7 @@
 | Campo | Valor |
 |---|---|
 | Módulo | `vynamp-decode` |
-| Crate(s) | 9: `vynamp-decode` (fachada), `vynamp-decode-core`, `-riff`, `-aiff`, `-pcm`, `-flac`, `-mpa`, `-mp3` e `vynamp-decode-testkit` (só teste) |
+| Crate(s) | 11: `vynamp-decode` (fachada), `vynamp-decode-core`, `-riff`, `-aiff`, `-pcm`, `-flac`, `-mpa`, `-mp3`, `-mp4`, `-alac` e `vynamp-decode-testkit` (só teste) |
 | Tipo | lib |
 | Versão da spec | 0.4.0 |
 | Data | 2026-11-13 |
@@ -42,7 +42,7 @@ declarada como lacuna em §10, não como contrato.
 > Autorado em 2026-11-11 a partir de `crates/vynamp-decode/src/lib.rs` e
 > `crates/vynamp-decode-core/src/lib.rs`. **Não aprovado.**
 
-Nove crates, mas **uma superfície pública só**: a fachada `vynamp-decode` reexporta
+Onze crates, mas **uma superfície pública só**: a fachada `vynamp-decode` reexporta
 todo o `vynamp-decode-core` (`pub use vynamp_decode_core::*`), e o consumidor nunca
 precisa nomear um crate interno. Nada além do que está aqui é contrato.
 
@@ -55,7 +55,7 @@ pub fn open_path(path: &Path, opts: Options) -> Result<Reader>;
 ```
 
 - **`default_registry()`** devolve um registro novo a cada chamada, contendo o que as
-  features ligaram. Por padrão, quatro containers e quatro codecs:
+  features ligaram. Por padrão, cinco containers e cinco codecs:
 
   | Tipo | Nome | Extensões | Verificação |
   |---|---|---|---|
@@ -63,10 +63,12 @@ pub fn open_path(path: &Path, opts: Options) -> Result<Reader>;
   | container | `aiff` | `.aif .aiff .aifc` | `Oracle` |
   | container | `flac` | `.flac .fla` | `Conformance` |
   | container | `mpa` | `.mp3 .mp2 .mp1 .mpa` | `Oracle` |
+  | container | `mp4` | `.m4a .m4b .mp4` | `Oracle` |
   | codec | `pcm` | — | `Oracle` |
   | codec | `flac` | — | `Conformance` |
   | codec | `mpeg-audio` | — | `Oracle` |
   | codec | `mpeg-audio-layer1` | — | `Experimental` |
+  | codec | `alac` | — | `Oracle` |
 
   A tabela não é documentação solta: `cargo run --example support_matrix` a imprime a
   partir do registro em tempo de execução.
@@ -112,6 +114,7 @@ impl Reader {
     pub fn events_dropped(&self) -> u64;
     pub fn read(&mut self, out: &mut AudioBuffer) -> Result<bool>;
     pub fn seek(&mut self, frame: u64) -> Result<()>;
+    pub fn chapters(&self) -> &[Chapter];
 }
 ```
 
@@ -133,6 +136,13 @@ containers sintéticos sem tocar no registro de produção.
 - **Eventos de diagnóstico:** `take_events` esvazia a fila; ela comporta 4 096 eventos e
   o excedente é contado em `events_dropped`, porque uma fila ilimitada num arquivo
   corrompido é um vetor de memória. `take_events` também zera o contador.
+- **Capítulos:** `chapters()` devolve as marcas que o container declara
+  (`Demuxer::chapters`), em ordem de início; vazio quando não há nenhuma. `Chapter` é
+  `{ title: String, start_frame: u64 }`, com `start_frame` na taxa da faixa e na
+  timeline **do container, sem trim** (não é a timeline de `position()`). Só leitura:
+  não há escrita de capítulo nem seek por capítulo. Acréscimo aprovado pelo mantenedor
+  em 2026-11-27, na `TASK-E01-11`: `Demuxer::chapters(&self) -> &[Chapter]` tem
+  implementação padrão vazia, então nenhum demuxer existente muda.
 - **`Reader` é `Send`.** Não é `Sync`, e não precisa ser: um leitor pertence a uma
   thread.
 
@@ -184,7 +194,7 @@ decodificar de um cache, de um pipe com seek ou de memória sem que o módulo sa
 ### 3.7 O que é reexportado do núcleo
 
 `Error`, `LimitKind`, `Result`, `Limits`, `Mode`, `Options`, `Event`, `CodecId`,
-`GaplessKind`, `SampleFormat`, `PcmSpec`, `PcmEncoding`, `Endian`, `Packet`, `SeekTo`,
+`Chapter`, `GaplessKind`, `SampleFormat`, `PcmSpec`, `PcmEncoding`, `Endian`, `Packet`, `SeekTo`,
 `Demuxer`, `Decoder`, `CancelSource`, `CancelToken`, `Md5`, `Verification`,
 `ContainerDescriptor`, `CodecDescriptor`, `OpenFn`, `skip_id3v2`, `ByteReader`,
 `BitReader`, `crc8`, `crc16`, `crc16_update`, `crc16_mpeg`, `Trailer`, `TrailerKind`,
