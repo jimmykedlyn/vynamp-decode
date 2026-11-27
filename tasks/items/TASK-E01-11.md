@@ -10,7 +10,7 @@
 | Módulo dono | `vynamp-decode` |
 | Repo | `jimmykedlyn/vynamp-decode` |
 | REQ coberto | `REQ-E01-11` (sub-requisito `DECODE-REQ-46-MP4` em `specs/formatos.md` §4) |
-| Critérios da spec | `specs/formatos.md` §5 — `DECODE-AC-53`, `DECODE-AC-54` (autorados, não aprovados) |
+| Critérios da spec | `specs/formatos.md` §5 — `DECODE-AC-53`, `DECODE-AC-54` (aprovados pelo mantenedor no merge do PR de spec de 2026-11-27) |
 | Fase | M2 |
 | Prioridade | P0 |
 | Estado | planned |
