@@ -203,3 +203,102 @@ fn configuration_errors_are_typed() {
     other.codec = CodecId::Flac;
     assert!(AlacDecoder::new(&other, &opts).is_err());
 }
+
+/// Header of one element with an explicit sample count, as written by `verbatim`.
+fn element_header(w: &mut W, tag: u32, samples: u32, compressed: bool) {
+    w.put(3, tag);
+    w.put(16, 0);
+    w.put(1, 1); // has size
+    w.put(2, 0); // no extra bits
+    w.put(1, u32::from(!compressed));
+    w.put(32, samples);
+}
+
+/// A compressed mono frame declaring `samples`, whose predictor uses `mode`, followed by
+/// a single residual bit `0` and the END tag. With one sample that bit is a zero residual
+/// (rice parameter 1, no zero run for the last sample), so the frame decodes to `[0]`.
+fn compressed_mono(samples: u32, mode: u32) -> Vec<u8> {
+    let mut w = W::default();
+    element_header(&mut w, 0, samples, true);
+    w.put(8, 0); // shift
+    w.put(8, 0); // weight
+    w.put(4, mode);
+    w.put(4, 9); // quant
+    w.put(3, 4); // mult
+    w.put(5, 0); // order
+    w.put(1, 0); // residual 0
+    w.put(3, 7);
+    w.out
+}
+
+fn expect_invalid(r: Result<(), Error>, what: &str) {
+    match r {
+        Err(Error::Invalid { what: got, .. }) => assert_eq!(got, what),
+        other => panic!("expected Invalid({what}), got {other:?}"),
+    }
+}
+
+#[test]
+fn a_sample_count_the_packet_cannot_hold_is_rejected_before_decoding() {
+    // The largest frame length the configuration allows: a forged count must not size the
+    // per-channel buffers (16M samples each) before the packet is checked against it.
+    let mut cfg = config(16, 1);
+    cfg[..4].copy_from_slice(&(4096u32 * 4096).to_be_bytes());
+    let mut d = AlacDecoder::new(&track(cfg, 1), &Options::default()).expect("decoder");
+    let mut buf = AudioBuffer::new();
+    let mut w = W::default();
+    element_header(&mut w, 0, 4096 * 4096, false);
+    w.put(16, 1);
+    w.put(3, 7);
+    expect_invalid(d.decode(&packet(w.out, 1), &mut buf), "alac frame size");
+    expect_invalid(
+        d.decode(&packet(compressed_mono(4096 * 4096, 0), 1), &mut buf),
+        "alac frame size",
+    );
+}
+
+#[test]
+fn a_compressed_frame_with_zero_residuals_decodes_to_silence() {
+    // The positive control of the two tests below: the same frame with prediction mode 0.
+    let mut d = decoder(16, 1, Mode::Strict);
+    let mut buf = AudioBuffer::new();
+    d.decode(&packet(compressed_mono(1, 0), 1), &mut buf)
+        .unwrap();
+    assert_eq!(buf.plane_i16(0).unwrap(), &[0]);
+}
+
+#[test]
+fn an_unknown_prediction_type_is_invalid_and_resilient_silence() {
+    let mut d = decoder(16, 1, Mode::Strict);
+    expect_invalid(
+        d.decode(&packet(compressed_mono(1, 5), 1), &mut AudioBuffer::new()),
+        "alac prediction type",
+    );
+    let mut d = decoder(16, 1, Mode::Resilient);
+    let mut buf = AudioBuffer::new();
+    d.decode(&packet(compressed_mono(1, 5), 1), &mut buf)
+        .unwrap();
+    assert_eq!(buf.plane_i16(0).unwrap(), &[0]);
+    let mut ev = Vec::new();
+    d.drain_events(&mut ev);
+    assert_eq!(ev.len(), 1, "{ev:?}");
+}
+
+#[test]
+fn an_unknown_element_tag_is_invalid_and_resilient_silence() {
+    // Tag 2 (CCE) is not an ALAC audio element.
+    let mut f = verbatim(16, &[&[1, 2]]);
+    f[0] = (f[0] & 0x1F) | (2 << 5);
+    let mut d = decoder(16, 1, Mode::Strict);
+    expect_invalid(
+        d.decode(&packet(f.clone(), 2), &mut AudioBuffer::new()),
+        "alac element",
+    );
+    let mut d = decoder(16, 1, Mode::Resilient);
+    let mut buf = AudioBuffer::new();
+    d.decode(&packet(f, 2), &mut buf).unwrap();
+    assert_eq!(buf.plane_i16(0).unwrap(), &[0; 2]);
+    let mut ev = Vec::new();
+    d.drain_events(&mut ev);
+    assert_eq!(ev.len(), 1, "{ev:?}");
+}

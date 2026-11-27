@@ -24,6 +24,9 @@ const TAG_SCE: u32 = 0;
 const TAG_CPE: u32 = 1;
 const TAG_LFE: u32 = 3;
 const TAG_END: u32 = 7;
+/// Most samples one rice step can cover: the sample plus a zero run of at most 65535
+/// (a 16-bit escape; non-escaped runs are shorter). Each step reads at least one bit.
+const MAX_SAMPLES_PER_RICE_BIT: u64 = 65_536;
 
 fn invalid(what: &'static str, offset: u64) -> Error {
     Error::Invalid { what, offset }
@@ -341,7 +344,7 @@ impl AlacDecoder {
                 TAG_END => break,
                 TAG_SCE | TAG_LFE => 1,
                 TAG_CPE => 2,
-                _ => return Err(Error::Unsupported("alac element")),
+                _ => return Err(invalid("alac element", b.pos / 8)),
             };
             if ch + n > usize::from(self.cfg.channels) {
                 return Err(invalid("alac element channels", b.pos / 8));
@@ -378,6 +381,17 @@ impl AlacDecoder {
         }
         if samples == 0 || samples > cfg.frame_length {
             return Err(invalid("alac frame length", b.pos / 8));
+        }
+        // Bound the declared count by what the rest of the packet can encode before
+        // sizing the per-channel buffers by it: verbatim samples take `bit_depth` bits
+        // each, compressed ones at least one bit per rice step.
+        let fits = if compressed {
+            u64::from(samples) <= b.left().saturating_mul(MAX_SAMPLES_PER_RICE_BIT)
+        } else {
+            u64::from(samples) * n as u64 * u64::from(cfg.bit_depth) <= b.left()
+        };
+        if !fits {
+            return Err(invalid("alac frame size", b.pos / 8));
         }
         let samples = samples as usize;
         match *len {
@@ -433,7 +447,7 @@ impl AlacDecoder {
                 match pc.mode {
                     0 => {}
                     15 => first_order(&mut self.err[c], bps),
-                    _ => return Err(Error::Unsupported("alac prediction type")),
+                    _ => return Err(invalid("alac prediction type", b.pos / 8)),
                 }
                 lpc(
                     &self.err[c],
