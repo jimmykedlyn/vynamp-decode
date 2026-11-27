@@ -101,3 +101,63 @@ thread 'verbatim_stereo_16_bit_frame_decodes_to_its_samples' (97116) panicked at
   left: F32
  right: I16
 test result: FAILED. 0 passed; 7 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+# NOTA DE FRANQUEZA (achado 6 do revisor em 51792d9)
+# O vermelho de demux.rs (17/17) e de decode.rs (7/7) registrado acima foi produzido contra
+# stubs locais (open_mp4/probe_mp4 e AlacDecoder que compilam e não fazem nada), trocados
+# temporariamente no disco e nunca commitados. Esses testes nasceram no mesmo commit da
+# implementação, então esse vermelho NÃO é reproduzível pelo histórico. Só o vermelho de
+# AC-53/54 (mp4_alac.rs, commit c2b6c70, antes dos crates mp4/alac) é reproduzível fazendo
+# checkout daquele SHA. Os vermelhos abaixo (correções do BLOQUEADO) foram obtidos com o
+# teste novo sobre o código de 51792d9, antes da correção, e o histórico mostra o teste e a
+# correção juntos em cada commit de fix (testes rodados antes, implementação depois).
+
+# Bloqueantes 1 e 2: testes novos em demux.rs sobre o código de 51792d9
+# (stsz fixo sem len, stsc grande, stsc fora de ordem); corrigidos em 263f45b
+$ target/debug/deps/demux-*.exe   (cargo test -p vynamp-decode-mp4 --test demux)
+test an_stsc_out_of_order_is_invalid ... FAILED
+test a_fixed_size_stsz_count_is_bounded_by_the_limits_without_a_source_length ... FAILED
+test a_large_stsc_opens_in_linear_time ... FAILED
+thread 'an_stsc_out_of_order_is_invalid' (100108) panicked at crates\vynamp-decode-mp4\tests\demux.rs:565:5:
+thread 'a_fixed_size_stsz_count_is_bounded_by_the_limits_without_a_source_length' (83612) panicked at crates\vynamp-decode-mp4\tests\demux.rs:532:5:
+assertion `left == right` failed
+  left: Invalid { what: "mp4 sample count", offset: 285 }
+ right: Limit(Metadata)
+thread 'a_large_stsc_opens_in_linear_time' (101400) panicked at crates\vynamp-decode-mp4\tests\demux.rs:551:5:
+open took 568.2829817s
+test result: FAILED. 17 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 568.64s
+
+# Achados 4 e 5: testes novos em decode.rs sobre o código de 51792d9; corrigidos em 33512b3
+# (a_compressed_frame_with_zero_residuals_decodes_to_silence é controle positivo e passa)
+$ target/debug/deps/decode-*.exe   (cargo test -p vynamp-decode-alac --test decode)
+test an_unknown_element_tag_is_invalid_and_resilient_silence ... FAILED
+test an_unknown_prediction_type_is_invalid_and_resilient_silence ... FAILED
+test a_sample_count_the_packet_cannot_hold_is_rejected_before_decoding ... FAILED
+thread 'an_unknown_element_tag_is_invalid_and_resilient_silence' (92816) panicked at crates\vynamp-decode-alac\tests\decode.rs:237:18:
+expected Invalid(alac element), got Err(Unsupported("alac element"))
+thread 'an_unknown_prediction_type_is_invalid_and_resilient_silence' (104888) panicked at crates\vynamp-decode-alac\tests\decode.rs:237:18:
+expected Invalid(alac prediction type), got Err(Unsupported("alac prediction type"))
+thread 'a_sample_count_the_packet_cannot_hold_is_rejected_before_decoding' (102560) panicked at crates\vynamp-decode-alac\tests\decode.rs:236:50:
+assertion `left == right` failed
+  left: "bitstream eof"
+ right: "alac frame size"
+test result: FAILED. 8 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.38s
+
+# Nits (capítulos em ordem de início, trak sem tkhd fora de uso): testes novos em demux.rs
+# sobre o código de 263f45b; corrigidos em 063a716
+$ target/debug/deps/demux-*.exe   (cargo test -p vynamp-decode-mp4 --test demux)
+test a_track_without_tkhd_that_is_not_used_does_not_fail_the_open ... FAILED
+test chapters_are_returned_in_start_order ... FAILED
+thread 'a_track_without_tkhd_that_is_not_used_does_not_fail_the_open' (87612) panicked at crates\vynamp-decode-mp4\tests\demux.rs:196:67:
+open: Invalid { what: "mp4 tkhd", offset: 768 }
+thread 'chapters_are_returned_in_start_order' (86136) panicked at crates\vynamp-decode-mp4\tests\demux.rs:594:5:
+assertion `left == right` failed
+  left: [("Second", 14400), ("First", 7200)]
+ right: [("First", 7200), ("Second", 14400)]
+test result: FAILED. 20 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.39s
+
+# Nit manifest(): com a coluna de taxa de alac-s16.m4a trocada por "48k" no disco
+# (restaurada depois), o teste agora reprova em vez de ler 0; commit d4ccb81
+$ target/debug/deps/mp4_alac-*.exe   (cargo test -p vynamp-decode --test mp4_alac)
+bad number "48k" in manifest row alac-s16.m4a|...: invalid digit found in string
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out
