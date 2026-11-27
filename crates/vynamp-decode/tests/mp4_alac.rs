@@ -27,7 +27,8 @@ struct Entry {
     origin: String,
 }
 
-/// The manifest, keyed by file name. Rows without audio (`-` columns) are kept with zeros.
+/// The manifest, keyed by file name. Rows without audio (`-` columns) are kept with zeros;
+/// any other non-numeric column fails the test.
 fn manifest() -> HashMap<String, Entry> {
     let text = std::fs::read_to_string(dir().join("MANIFEST.txt")).expect("MANIFEST.txt");
     let mut out = HashMap::new();
@@ -37,7 +38,13 @@ fn manifest() -> HashMap<String, Entry> {
     {
         let f: Vec<&str> = line.split('|').collect();
         assert!(f.len() >= 9, "short manifest row: {line}");
-        let num = |s: &str| s.parse::<u64>().unwrap_or(0);
+        // `-` marks a row without audio; anything else must be a number.
+        let num = |s: &str| match s {
+            "-" => 0,
+            _ => s
+                .parse::<u64>()
+                .unwrap_or_else(|e| panic!("bad number {s:?} in manifest row {line}: {e}")),
+        };
         out.insert(
             f[0].to_string(),
             Entry {
