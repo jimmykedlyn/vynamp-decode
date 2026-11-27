@@ -161,3 +161,22 @@ test result: FAILED. 20 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out;
 $ target/debug/deps/mp4_alac-*.exe   (cargo test -p vynamp-decode --test mp4_alac)
 bad number "48k" in manifest row alac-s16.m4a|...: invalid digit found in string
 test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out
+
+# Ressalvas do revisor em 8369d4c (alocação controlada pelo arquivo)
+# 1. stsz com tamanho fixo 0xFFFFFFFF e uma amostra, numa fonte sem len: teste novo sobre
+#    o código de 8369d4c; corrigido em e84196e
+$ target/debug/deps/demux-*.exe a_sample_larger   (cargo test -p vynamp-decode-mp4 --test demux)
+test a_sample_larger_than_a_source_without_length_fails_without_allocating_its_size ... FAILED
+thread 'a_sample_larger_than_a_source_without_length_fails_without_allocating_its_size' (91496) panicked at crates\vynamp-decode-mp4\tests\demux.rs:636:5:
+allocated 4294967295 bytes for a file of a few hundred
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 22 filtered out; finished in 22.57s
+
+# 2. frame ALAC comprimido de 64 bytes declarando 16M amostras: teste novo sobre o código
+#    de 8369d4c; corrigido em 46b3e6e (fixtures reais de mp4_alac.rs seguem bit-exatas)
+$ target/debug/deps/decode-*.exe   (cargo test -p vynamp-decode-alac --test decode)
+test a_compressed_count_beyond_what_the_packet_can_encode_is_rejected ... FAILED
+thread 'a_compressed_count_beyond_what_the_packet_can_encode_is_rejected' (27784) panicked at crates\vynamp-decode-alac\tests\decode.rs:236:50:
+assertion `left == right` failed
+  left: "bitstream eof"
+ right: "alac frame size"
+test result: FAILED. 11 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.28s
