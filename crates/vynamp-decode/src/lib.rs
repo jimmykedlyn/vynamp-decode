@@ -100,6 +100,30 @@ pub static MPEG_AUDIO_LAYER1_CODEC: CodecDescriptor = CodecDescriptor {
     make: |track, opts| Ok(Box::new(vynamp_decode_mp3::MpegDecoder::new(track, opts)?)),
 };
 
+/// Descriptor of the MP4 / ISO base media file format container (`.m4a`, `.m4b`, `.mp4`),
+/// with one ALAC audio track and its chapters.
+///
+/// Verified bit-exact against the PCM that FFmpeg encoded, hence `Oracle`.
+#[cfg(feature = "mp4")]
+pub static MP4: ContainerDescriptor = ContainerDescriptor {
+    name: "mp4",
+    extensions: &["m4a", "m4b", "mp4"],
+    probe: vynamp_decode_mp4::probe_mp4,
+    verification: Verification::Oracle,
+    open: |src, opts| Ok(Box::new(vynamp_decode_mp4::open_mp4(src, opts)?)),
+};
+
+/// Descriptor of the ALAC (Apple Lossless) codec, 16 and 24 bits, mono and stereo.
+///
+/// Verified bit-exact against the PCM that FFmpeg encoded, hence `Oracle`.
+#[cfg(feature = "alac")]
+pub static ALAC_CODEC: CodecDescriptor = CodecDescriptor {
+    name: "alac",
+    verification: Verification::Oracle,
+    supports: |id| matches!(id, CodecId::Alac),
+    make: |track, opts| Ok(Box::new(vynamp_decode_alac::AlacDecoder::new(track, opts)?)),
+};
+
 /// Registry containing every container and codec enabled by features.
 pub fn default_registry() -> Registry {
     #[allow(unused_mut)]
@@ -112,6 +136,8 @@ pub fn default_registry() -> Registry {
     reg.add_container(&FLAC);
     #[cfg(feature = "mpa")]
     reg.add_container(&MPA);
+    #[cfg(feature = "mp4")]
+    reg.add_container(&MP4);
     #[cfg(feature = "pcm")]
     reg.add_codec(&PCM);
     #[cfg(feature = "flac")]
@@ -120,6 +146,8 @@ pub fn default_registry() -> Registry {
     reg.add_codec(&MPEG_AUDIO_CODEC);
     #[cfg(feature = "mp3")]
     reg.add_codec(&MPEG_AUDIO_LAYER1_CODEC);
+    #[cfg(feature = "alac")]
+    reg.add_codec(&ALAC_CODEC);
     reg
 }
 
